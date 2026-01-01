@@ -18,7 +18,6 @@ genai.configure(api_key=api_key)
 # --- 2. SMART KNOWLEDGE LOADER ---
 @st.cache_resource
 def get_pdf_file(filename):
-    """Uploads a specific PDF only when requested"""
     if os.path.exists(filename):
         try:
             f = genai.upload_file(path=filename, display_name=filename)
@@ -28,16 +27,12 @@ def get_pdf_file(filename):
     return None
 
 def inject_knowledge(persona_type):
-    """Returns the specific file object based on persona"""
-    if persona_type == "SALARY":
-        return get_pdf_file("salary_rules.pdf")
-    elif persona_type == "BUSINESS":
-        return get_pdf_file("freelancer_rules.pdf")
-    elif persona_type == "CAPITAL_GAINS":
-        return get_pdf_file("capital_gains.pdf")
+    if persona_type == "SALARY": return get_pdf_file("salary_rules.pdf")
+    elif persona_type == "BUSINESS": return get_pdf_file("freelancer_rules.pdf")
+    elif persona_type == "CAPITAL_GAINS": return get_pdf_file("capital_gains.pdf")
     return None
 
-# --- 3. CALCULATOR ENGINE (Detailed) ---
+# --- 3. CALCULATOR ENGINE ---
 def calculate_tax_detailed(age, salary, business_income, rent_paid, inv_80c, med_80d):
     std_deduction_new = 75000; std_deduction_old = 50000
     
@@ -75,132 +70,141 @@ def compute_tax(income, age, regime):
         if income <= 500000: tax = 0
     return int(tax * 1.04)
 
-# --- 4. THE SMART BRAIN ---
-# Note: We now have a "ROUTER" logic in the prompt
+# --- 4. THE BRAIN ---
 sys_instruction = """
 You are "TaxGuide AI". 
-**Goal:** Discover the user's persona, LOAD the right rules, then Guide them.
+**Goal:** Discover user needs, LOAD rules dynamically, then Guide.
 
-**PHASE 1: PERSONA DETECTION (CRITICAL)**
-- If the user mentions "Salary", "Job", "Payslip" -> Output exactly: `LOAD(SALARY)`
-- If the user mentions "Freelance", "Business", "Consultant" -> Output exactly: `LOAD(BUSINESS)`
-- If the user mentions "Stocks", "Trading", "Capital Gains" -> Output exactly: `LOAD(CAPITAL_GAINS)`
-
-**PHASE 2: GUIDANCE (After Rules are Loaded)**
-- Once rules are loaded, ask guiding questions based on that persona.
-- Ask Age, Income, and Deductions (Rent, 80C, 80D).
-
-**PHASE 3: CALCULATION**
-- Once you have all data, output: `CALCULATE(age=..., salary=..., business=..., rent=..., inv80c=..., med80d=...)`
+**LOGIC FLOW:**
+1. **Start:** Ask "How do you earn income?"
+2. **Detect Persona & LOAD:**
+   - If User says "Salary/Job" -> Output: `LOAD(SALARY)`
+   - If User says "Freelance/Business" -> Output: `LOAD(BUSINESS)`
+   - If User says "Stocks/Trading" -> Output: `LOAD(CAPITAL_GAINS)`
+3. **Deep Dive (Only after loading):**
+   - Ask Age.
+   - Ask Income.
+   - Ask Deductions (Rent, 80C, 80D).
+4. **Calculate:**
+   - Output: `CALCULATE(age=..., salary=..., business=..., rent=..., inv80c=..., med80d=...)`
 """
 
-# --- 5. UI SETUP ---
+# --- 5. UI HEADER ---
 col1, col2 = st.columns([5, 1])
 with col1: st.markdown("### 🇮🇳 TaxGuide AI")
 with col2: 
     if st.button("🔄", help="Reset"):
         st.session_state.clear()
         st.rerun()
-st.warning("⚠️ **Disclaimer:** I am an AI. Verify with a CA.", icon="⚠️")
 
-# --- 6. CHAT SESSION MANAGEMENT ---
-if "chat_session" not in st.session_state:
-    # Start with NO PDFs (Lightweight)
-    model = genai.GenerativeModel('gemini-2.0-flash', system_instruction=sys_instruction)
-    st.session_state.chat_session = model.start_chat(history=[])
-    st.session_state.loaded_persona = None # Track what we have loaded
+# --- 6. FORK LOGIC ---
+if "mode" not in st.session_state:
+    st.session_state.mode = None
+    st.session_state.chat_session = None
+    st.session_state.loaded_persona = None
 
-# --- 7. WELCOME MESSAGE ---
-if len(st.session_state.chat_session.history) == 0:
-    st.markdown("#### 👋 Hello! How do you earn your income?")
-    st.info("👇 **Tell me:** *\"I have a salary\"* or *\"I am a freelancer\"*")
-
-# --- 8. DISPLAY HISTORY ---
-for msg in st.session_state.chat_session.history:
-    # Hide system injection messages from view
-    if getattr(msg.parts[0], "text", "") and "LOAD" not in msg.parts[0].text:
-        role = "user" if msg.role == "user" else "assistant"
-        avatar = "👤" if role == "user" else "🤖"
-        # Hide raw triggers
-        if "CALCULATE(" not in msg.parts[0].text and "LOAD(" not in msg.parts[0].text:
-            with st.chat_message(role, avatar=avatar):
-                st.markdown(msg.parts[0].text)
-
-# --- 9. MAIN LOGIC LOOP ---
-if prompt := st.chat_input("Type here..."):
-    st.chat_message("user", avatar="👤").markdown(prompt)
+# SCREEN 1: THE FORK BUTTONS
+if st.session_state.mode is None:
+    st.markdown("#### 👋 How can I help you today?")
+    st.info("I am optimized to save you tax. Choose a path:")
     
-    with st.spinner("Thinking..."):
-        try:
-            # Send message to AI
-            response = st.session_state.chat_session.send_message(prompt)
-            text = response.text
+    c1, c2 = st.columns(2)
+    with c1:
+        if st.button("💰 Calculate My Tax", use_container_width=True):
+            st.session_state.mode = "CALC"
+            # Start Chat WITHOUT PDFs (Fast Load)
+            model = genai.GenerativeModel('gemini-2.0-flash', system_instruction=sys_instruction)
+            st.session_state.chat_session = model.start_chat(history=[])
+            # First AI Message
+            st.session_state.chat_session.history.append({"role": "model", "parts": ["Let's calculate! First, how do you earn your income? (Salary, Business, or both?)"]})
+            st.rerun()
             
-            # --- CHECK FOR "LOAD" TRIGGER (The Optimization) ---
-            if "LOAD(" in text:
-                persona = text.split("LOAD(")[1].split(")")[0]
+    with c2:
+        if st.button("📚 Ask Tax Rules", use_container_width=True):
+            st.session_state.mode = "RULES"
+            # Start Chat WITHOUT PDFs
+            model = genai.GenerativeModel('gemini-2.0-flash', system_instruction=sys_instruction)
+            st.session_state.chat_session = model.start_chat(history=[])
+            # First AI Message
+            st.session_state.chat_session.history.append({"role": "model", "parts": ["I can explain tax rules. Which topic? (Salary, Freelancing, Capital Gains?)"]})
+            st.rerun()
+
+# SCREEN 2: THE CHAT INTERFACE
+else:
+    # Display History
+    for msg in st.session_state.chat_session.history:
+        # Hide system/trigger messages
+        if getattr(msg.parts[0], "text", "") and "LOAD" not in msg.parts[0].text:
+            if "Result:" not in msg.parts[0].text: # We show result via card, not text
+                role = "user" if msg.role == "user" else "assistant"
+                avatar = "👤" if role == "user" else "🤖"
+                with st.chat_message(role, avatar=avatar):
+                    st.markdown(msg.parts[0].text)
+
+    # Input Handling
+    if prompt := st.chat_input("Type here..."):
+        st.chat_message("user", avatar="👤").markdown(prompt)
+        
+        with st.spinner("Analyzing..."):
+            try:
+                response = st.session_state.chat_session.send_message(prompt)
+                text = response.text
                 
-                # If we haven't loaded this yet, do it now
-                if st.session_state.loaded_persona != persona:
-                    file_ref = inject_knowledge(persona)
-                    if file_ref:
-                        # TO INJECT: We must restart chat with history + new file
-                        # 1. Save current conversation
-                        current_history = st.session_state.chat_session.history[:-1] # Exclude the LOAD command
-                        
-                        # 2. Add File to history (Gemini requires file in 'user' role)
-                        current_history.append({"role": "user", "parts": [file_ref, "I have loaded the relevant tax rules. Please continue guiding me."]})
-                        current_history.append({"role": "model", "parts": ["Understood. Rules loaded."]})
-                        
-                        # 3. Restart Session
-                        model = genai.GenerativeModel('gemini-2.0-flash', system_instruction=sys_instruction)
-                        st.session_state.chat_session = model.start_chat(history=current_history)
-                        st.session_state.loaded_persona = persona
-                        
-                        # 4. Prompt AI to acknowledge
-                        response = st.session_state.chat_session.send_message("I have loaded the rules. What is the next question?")
-                        text = response.text
-                        
-                        st.toast(f"📚 Loaded Knowledge: {persona} Rules", icon="✅")
+                # --- TRIGGER: LOAD PDF ---
+                if "LOAD(" in text:
+                    persona = text.split("LOAD(")[1].split(")")[0]
+                    if st.session_state.loaded_persona != persona:
+                        file_ref = inject_knowledge(persona)
+                        if file_ref:
+                            # Inject File
+                            hist = st.session_state.chat_session.history[:-1] # Remove LOAD cmd
+                            hist.append({"role": "user", "parts": [file_ref, "Rules loaded."]})
+                            hist.append({"role": "model", "parts": ["Understood."]})
+                            
+                            # Restart
+                            model = genai.GenerativeModel('gemini-2.0-flash', system_instruction=sys_instruction)
+                            st.session_state.chat_session = model.start_chat(history=hist)
+                            st.session_state.loaded_persona = persona
+                            
+                            # Continue Flow
+                            st.toast(f"📚 Loaded {persona} Rules", icon="✅")
+                            response = st.session_state.chat_session.send_message("Rules loaded. Please ask the next question.")
+                            text = response.text
 
-            # --- CHECK FOR "CALCULATE" TRIGGER ---
-            if "CALCULATE(" in text:
-                try:
-                    params = text.split("CALCULATE(")[1].split(")")[0]
-                    data = {"age":30, "salary":0, "business":0, "rent":0, "inv80c":0, "med80d":0}
-                    for part in params.split(","):
-                        if "=" in part:
-                            k, v = part.split("="); 
-                            vc = ''.join(filter(str.isdigit, v.strip()))
-                            if vc: data[k.strip()] = int(vc)
-                    
-                    tn, to, net_new, net_old = calculate_tax_detailed(
-                        data['age'], data['salary'], data['business'], 
-                        data['rent'], data['inv80c'], data['med80d']
-                    )
-                    
-                    winner = "New Regime" if tn < to else "Old Regime"
-                    savings = abs(tn - to)
-                    
-                    st.chat_message("assistant", avatar="🤖").markdown(f"""
-                    ### 🧾 Tax Analysis
-                    **Recommendation:** Go with **{winner}** (Save ₹{savings:,})
-                    
-                    | | **New Regime** | **Old Regime** |
-                    | :--- | :--- | :--- |
-                    | Taxable Income | ₹{net_new:,} | ₹{net_old:,} |
-                    | **Total Tax** | **₹{tn:,}** | **₹{to:,}** |
-                    """)
-                    
-                    # Clean history
-                    st.session_state.chat_session.history.append({"role": "model", "parts": [f"Result: New={tn}, Old={to}"]})
+                # --- TRIGGER: CALCULATE ---
+                if "CALCULATE(" in text:
+                    try:
+                        params = text.split("CALCULATE(")[1].split(")")[0]
+                        data = {"age":30, "salary":0, "business":0, "rent":0, "inv80c":0, "med80d":0}
+                        for part in params.split(","):
+                            if "=" in part:
+                                k, v = part.split("="); 
+                                vc = ''.join(filter(str.isdigit, v.strip()))
+                                if vc: data[k.strip()] = int(vc)
+                        
+                        tn, to, net_new, net_old = calculate_tax_detailed(
+                            data['age'], data['salary'], data['business'], 
+                            data['rent'], data['inv80c'], data['med80d']
+                        )
+                        
+                        winner = "New Regime" if tn < to else "Old Regime"
+                        savings = abs(tn - to)
+                        
+                        st.chat_message("assistant", avatar="🤖").markdown(f"""
+                        ### 🧾 Tax Analysis
+                        **Recommendation:** Go with **{winner}** (Save ₹{savings:,})
+                        
+                        | | **New Regime** | **Old Regime** |
+                        | :--- | :--- | :--- |
+                        | Taxable Income | ₹{net_new:,} | ₹{net_old:,} |
+                        | **Total Tax** | **₹{tn:,}** | **₹{to:,}** |
+                        """)
+                        
+                        st.session_state.chat_session.history.append({"role": "model", "parts": [f"Result: New={tn}, Old={to}"]})
+                    except: st.error("Calculation Failed")
 
-                except Exception as e: st.error(f"Calc Error: {e}")
-            
-            else:
-                # Normal Text (Avoid showing raw triggers)
-                if "LOAD(" not in text and "CALCULATE(" not in text:
-                    st.chat_message("assistant", avatar="🤖").markdown(text)
+                else:
+                    if "LOAD(" not in text:
+                        st.chat_message("assistant", avatar="🤖").markdown(text)
 
-        except Exception as e:
-            st.error(f"Error: {e}")
+            except Exception as e: st.error(f"Error: {e}")
