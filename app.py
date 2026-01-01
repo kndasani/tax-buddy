@@ -103,10 +103,14 @@ if "chat_session" not in st.session_state:
         
     st.session_state.chat_session = model.start_chat(history=initial_history)
 
-# 5. DISPLAY CHAT HISTORY
+# --- HELPER: CHECK IF CHAT HAS STARTED ---
+# We ignore the first 2 messages if they are the System+PDF injection
+start_index = 0
+if tax_pdf:
+    start_index = 2 
 
-# Check if history is empty (User just opened the app)
-if not st.session_state.chat_session.history:
+# 5. WELCOME SCREEN (Only if no REAL user messages exist)
+if len(st.session_state.chat_session.history) <= start_index:
     with st.container():
         st.markdown("### 👋 Welcome to TaxGuide AI!")
         st.markdown("I can help you choose the best tax regime (Old vs New).")
@@ -114,20 +118,36 @@ if not st.session_state.chat_session.history:
         st.code("My salary is 18 Lakhs", language=None) 
         st.markdown("*I will ask you about rent and investments later!*")
 
-for message in st.session_state.chat_session.history:
+# 6. DISPLAY CHAT HISTORY (Hide the PDF injection)
+# We slice the history to skip the first 2 "hidden" system messages
+for message in st.session_state.chat_session.history[start_index:]:
     role = "user" if message.role == "user" else "assistant"
     with st.chat_message(role):
         st.markdown(message.parts[0].text)
 
-# 6. HANDLE USER INPUT
-if prompt := st.chat_input("Ask a question (e.g., Calculate tax for 15 Lakhs)..."):
-    # Display user message
+# 7. HANDLE USER INPUT
+if prompt := st.chat_input("Ask a question..."):
+    # Display user message immediately
     st.chat_message("user").markdown(prompt)
-
-    # Send to Gemini
-    with st.spinner("Thinking..."):
+    
+    with st.spinner("Thinking... (Checking Tax Laws)"):
         try:
-            response = st.session_state.chat_session.send_message(prompt)
-            st.chat_message("assistant").markdown(response.text)
+            # RETRY LOGIC for 429 Errors
+            max_retries = 3
+            for attempt in range(max_retries):
+                try:
+                    response = st.session_state.chat_session.send_message(prompt)
+                    st.chat_message("assistant").markdown(response.text)
+                    break # Success! Exit the retry loop
+                except Exception as e:
+                    # If it's a 429 error, wait and try again
+                    if "429" in str(e) and attempt < max_retries - 1:
+                        time.sleep(2 * (attempt + 1)) # Wait 2s, then 4s...
+                        continue
+                    else:
+                        raise e # If it's not a 429 (or retries failed), crash for real
+                        
         except Exception as e:
-            st.error(f"An error occurred: {e}")
+            st.error(f"⚠️ An error occurred: {e}")
+            if "429" in str(e):
+                st.warning("📉 **Server Busy:** We hit the rate limit. Please wait 10 seconds and try again.")
