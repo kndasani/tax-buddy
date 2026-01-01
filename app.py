@@ -5,8 +5,18 @@ import numpy as np
 import os
 
 # 1. PAGE SETUP
-st.set_page_config(page_title="TaxBuddy AI", page_icon="💰")
-st.title("💰 TaxBuddy: Old vs New Regime Helper")
+st.set_page_config(page_title="TaxGuide AI", page_icon="📊")
+st.title("📊 TaxGuide AI: Intelligent Tax Assistant")
+
+# 1.1 DISCLAIMER
+with st.sidebar:
+    st.header("⚠️ Disclaimer")
+    st.warning(
+        "This tool is designed for **Indian Income Tax (FY 2025-26)** only.\n\n"
+        "It is an AI-powered helper, not a substitute for professional advice. "
+        "Please consult a **Chartered Accountant (CA)** before filing your taxes."
+    )
+    st.markdown("---")
 
 # 2. SETUP API
 if "GOOGLE_API_KEY" in st.secrets:
@@ -70,22 +80,16 @@ if "chat_session" not in st.session_state:
     st.session_state.chat_session = model.start_chat(history=[])
 
 # 5. DISPLAY CHAT HISTORY
-# --- INSERT THIS BLOCK ---
 
 # Check if history is empty (User just opened the app)
 if not st.session_state.chat_session.history:
-    # Create a nice container for the welcome message
     with st.container():
-        st.markdown("### 👋 Welcome to TaxBuddy!")
+        st.markdown("### 👋 Welcome to TaxGuide AI!")
         st.markdown("I can help you choose the best tax regime (Old vs New).")
-        
-        # Make the example prompt stand out with a colored box
         st.info("👇 **To get started, just tell me your salary:**")
         st.code("My salary is 18 Lakhs", language=None) 
-        
         st.markdown("*I will ask you about rent and investments later!*")
 
-# --- END OF INSERTION ---
 for message in st.session_state.chat_session.history:
     role = "user" if message.role == "user" else "assistant"
     with st.chat_message(role):
