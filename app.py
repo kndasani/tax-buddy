@@ -25,7 +25,25 @@ if not api_key:
 
 genai.configure(api_key=api_key)
 
-# --- 3. THE CALCULATOR ENGINE ---
+# --- 3. HELPER: SMART RETRY (Fixes 429 Errors) ---
+def send_message_with_retry(chat_session, prompt, retries=3):
+    """
+    If Google sends a 429 (Busy) error, this function waits 
+    and retries automatically instead of crashing.
+    """
+    for i in range(retries):
+        try:
+            return chat_session.send_message(prompt)
+        except Exception as e:
+            if "429" in str(e):
+                wait_time = (2 ** i) + 2  # Wait 3s, 4s, 6s...
+                time.sleep(wait_time)
+                continue
+            else:
+                raise e
+    raise Exception("⚠️ Server is very busy. Please wait a minute and try again.")
+
+# --- 4. THE CALCULATOR ENGINE ---
 def calculate_tax_logic(age, salary, business_income, rent_paid, inv_80c, med_80d):
     std_deduction_new = 75000 
     std_deduction_old = 50000
@@ -67,7 +85,7 @@ def compute_slabs(inc_new, inc_old, age):
 
     return int(tax_new * 1.04), int(tax_old * 1.04)
 
-# --- 4. LOAD KNOWLEDGE ---
+# --- 5. LOAD KNOWLEDGE ---
 @st.cache_resource
 def load_knowledge():
     library = []
@@ -83,7 +101,7 @@ def load_knowledge():
 
 pdf_library = load_knowledge()
 
-# --- 5. THE CONSULTANT BRAIN ---
+# --- 6. THE CONSULTANT BRAIN ---
 sys_instruction = """
 You are "TaxGuide AI", an expert and empathetic Indian Tax Consultant.
 **Your Goal:** Guide the user to the best tax regime by discovering their details conversationally.
@@ -110,7 +128,7 @@ You are "TaxGuide AI", an expert and empathetic Indian Tax Consultant.
   `CALCULATE(age=..., salary=..., business=..., rent=..., inv80c=..., med80d=...)`
 """
 
-# --- 6. HEADER & DISCLAIMER ---
+# --- 7. HEADER & DISCLAIMER ---
 col1, col2 = st.columns([5, 1])
 with col1:
     st.markdown("### 🇮🇳 TaxGuide AI")
@@ -122,7 +140,7 @@ with col2:
 st.warning("⚠️ **Disclaimer:** I am an AI Assistant. Tax laws are complex. Please verify these figures with a Chartered Accountant (CA) before filing.", icon="⚠️")
 st.divider()
 
-# --- 7. CHAT LOGIC ---
+# --- 8. CHAT LOGIC ---
 if "chat_session" not in st.session_state:
     history = []
     if pdf_library:
@@ -132,8 +150,7 @@ if "chat_session" not in st.session_state:
     model = genai.GenerativeModel('gemini-2.0-flash', system_instruction=sys_instruction)
     st.session_state.chat_session = model.start_chat(history=history)
 
-# --- 8. WELCOME HINTS (RESTORED) ---
-# Check if history is empty (ignoring hidden system messages)
+# --- 9. WELCOME HINTS ---
 if len(st.session_state.chat_session.history) <= 2:
     st.markdown("#### 👋 Hello! I can help you save tax.")
     st.markdown("I don't need forms. Just talk to me like a human!")
@@ -143,7 +160,7 @@ if len(st.session_state.chat_session.history) <= 2:
             "- *\"I am a freelance designer with 30 Lakhs income.\"*\n"
             "- *\"I have a salary plus some stock market profit.\"*")
 
-# --- 9. DISPLAY CHAT ---
+# --- 10. DISPLAY CHAT ---
 start_idx = 2 if pdf_library else 0
 for msg in st.session_state.chat_session.history[start_idx:]:
     role = "user" if msg.role == "user" else "assistant"
@@ -152,13 +169,14 @@ for msg in st.session_state.chat_session.history[start_idx:]:
     with st.chat_message(role, avatar=avatar):
         st.markdown(msg.parts[0].text)
 
-# --- 10. INPUT HANDLING ---
+# --- 11. INPUT HANDLING ---
 if prompt := st.chat_input("Type your answer..."):
     st.chat_message("user", avatar="👤").markdown(prompt)
     
     with st.spinner("Analyzing..."):
         try:
-            response = st.session_state.chat_session.send_message(prompt)
+            # --- UPDATED: USE THE RETRY FUNCTION ---
+            response = send_message_with_retry(st.session_state.chat_session, prompt)
             text = response.text
             
             if "CALCULATE(" in text:
