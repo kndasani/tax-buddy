@@ -8,15 +8,12 @@ import os
 st.set_page_config(page_title="TaxGuide AI", page_icon="📊")
 st.title("📊 TaxGuide AI: Intelligent Tax Assistant")
 
-# 1.1 DISCLAIMER
-with st.sidebar:
-    st.header("⚠️ Disclaimer")
-    st.warning(
-        "This tool is designed for **Indian Income Tax (FY 2025-26)** only.\n\n"
-        "It is an AI-powered helper, not a substitute for professional advice. "
-        "Please consult a **Chartered Accountant (CA)** before filing your taxes."
-    )
-    st.markdown("---")
+# 1.1 DISCLAIMER (Mobile Friendly)
+st.warning(
+    "⚠️ **DISCLAIMER: Indian Income Tax (FY 2025-26)**\n\n"
+    "This AI is a helper, not a substitute for a Chartered Accountant. "
+    "Always verify calculations before filing."
+)
 
 # 2. SETUP API
 if "GOOGLE_API_KEY" in st.secrets:
