@@ -15,15 +15,14 @@ if not api_key:
 
 genai.configure(api_key=api_key)
 
-# --- 2. HELPER: RETRY LOGIC (Crucial for 429 Errors) ---
+# --- 2. HELPER: RETRY LOGIC (Crucial) ---
 def send_message_with_retry(chat_session, prompt, retries=3):
-    """Wraps the API call with a safety delay"""
     for i in range(retries):
         try:
             return chat_session.send_message(prompt)
         except Exception as e:
             if "429" in str(e):
-                time.sleep(2 ** (i + 1)) # Wait 2s, 4s, 8s...
+                time.sleep(2 ** (i + 1))
                 continue
             else:
                 raise e
@@ -84,23 +83,32 @@ def compute_tax(income, age, regime):
         if income <= 500000: tax = 0
     return int(tax * 1.04)
 
-# --- 5. THE BRAIN ---
+# --- 5. THE PATIENT BRAIN (Updated Prompt) ---
 sys_instruction = """
-You are "TaxGuide AI". 
-**Goal:** Discover user needs, LOAD rules dynamically, then Guide.
+You are "TaxGuide AI", a friendly, patient, and non-judgmental Indian Tax Expert.
+**Core Rule:** Talk like a human, not a form. Avoid jargon.
 
 **LOGIC FLOW:**
-1. **Start:** Ask "How do you earn income?"
-2. **Detect Persona & LOAD:**
-   - If User says "Salary/Job" -> Output: `LOAD(SALARY)`
+
+1. **START:** Ask gently: "To get started, how do you earn your living? (e.g., A Salary, Freelancing, or your own Business?)"
+
+2. **DETECT & LOAD (Invisible Step):**
+   - If User says "Salary" -> Output: `LOAD(SALARY)`
    - If User says "Freelance/Business" -> Output: `LOAD(BUSINESS)`
-   - If User says "Stocks/Trading" -> Output: `LOAD(CAPITAL_GAINS)`
-3. **Deep Dive (Only after loading):**
-   - Ask Age.
-   - Ask Income.
-   - Ask Deductions (Rent, 80C, 80D).
-4. **Calculate:**
-   - Output: `CALCULATE(age=..., salary=..., business=..., rent=..., inv80c=..., med80d=...)`
+   - If User says "Stocks" -> Output: `LOAD(CAPITAL_GAINS)`
+
+3. **THE INTERVIEW (After Loading):**
+   - **CRITICAL:** Ask questions **ONE BY ONE**. Wait for the answer before asking the next.
+   - **Step 1 (Age):** "First, could you tell me your age? (This helps me check for Senior Citizen benefits)."
+   - **Step 2 (Income):** "Thanks! What is your total annual income roughly?"
+   - **Step 3 (Deductions - The Guide):**
+     - Do NOT ask "What is your 80C?".
+     - **Ask:** "Do you live in a rented house? If yes, how much rent do you pay?"
+     - **Then Ask:** "Do you have any long-term savings like PF, PPF, or Life Insurance?" (Internal Note: Map this to 80C).
+     - **Then Ask:** "Do you pay for medical insurance for yourself or parents?" (Internal Note: Map this to 80D).
+
+4. **CALCULATE:**
+   - Only when you have the full picture, output: `CALCULATE(age=..., salary=..., business=..., rent=..., inv80c=..., med80d=...)`
 """
 
 # --- 6. UI HEADER ---
@@ -117,10 +125,10 @@ if "mode" not in st.session_state:
     st.session_state.chat_session = None
     st.session_state.loaded_persona = None
 
-# SCREEN 1: THE FORK BUTTONS
+# SCREEN 1: BUTTONS
 if st.session_state.mode is None:
     st.markdown("#### 👋 How can I help you today?")
-    st.info("I am optimized to save you tax. Choose a path:")
+    st.info("I'm here to simplify your taxes. Choose a path:")
     
     c1, c2 = st.columns(2)
     with c1:
@@ -128,7 +136,8 @@ if st.session_state.mode is None:
             st.session_state.mode = "CALC"
             model = genai.GenerativeModel('gemini-2.0-flash', system_instruction=sys_instruction)
             st.session_state.chat_session = model.start_chat(history=[])
-            st.session_state.chat_session.history.append({"role": "model", "parts": ["Let's calculate! First, how do you earn your income? (Salary, Business, or both?)"]})
+            # Friendly Starter
+            st.session_state.chat_session.history.append({"role": "model", "parts": ["Hi there! Let's work out your taxes together. First, do you earn a Salary, run a Business, or work as a Freelancer?"]})
             st.rerun()
             
     with c2:
@@ -136,15 +145,13 @@ if st.session_state.mode is None:
             st.session_state.mode = "RULES"
             model = genai.GenerativeModel('gemini-2.0-flash', system_instruction=sys_instruction)
             st.session_state.chat_session = model.start_chat(history=[])
-            st.session_state.chat_session.history.append({"role": "model", "parts": ["I can explain tax rules. Which topic? (Salary, Freelancing, Capital Gains?)"]})
+            st.session_state.chat_session.history.append({"role": "model", "parts": ["I can explain tax rules simply. What topic are you curious about?"]})
             st.rerun()
 
-# SCREEN 2: THE CHAT INTERFACE
+# SCREEN 2: CHAT
 else:
-    # --- SAFE DISPLAY HISTORY LOOP ---
     for msg in st.session_state.chat_session.history:
-        text = ""
-        role = ""
+        text, role = "", ""
         if isinstance(msg, dict):
             role = msg.get("role")
             parts = msg.get("parts", [])
@@ -156,46 +163,38 @@ else:
             role = msg.role
             text = msg.parts[0].text
 
-        if text and "LOAD" not in text:
-            if "Result:" not in text:
-                role_name = "user" if role == "user" else "assistant"
-                avatar = "👤" if role == "user" else "🤖"
-                with st.chat_message(role_name, avatar=avatar):
-                    st.markdown(text)
+        if text and "LOAD" not in text and "Result:" not in text:
+            role_name = "user" if role == "user" else "assistant"
+            avatar = "👤" if role == "user" else "🤖"
+            with st.chat_message(role_name, avatar=avatar):
+                st.markdown(text)
 
-    # Input Handling
-    if prompt := st.chat_input("Type here..."):
+    if prompt := st.chat_input("Type your answer..."):
         st.chat_message("user", avatar="👤").markdown(prompt)
         
-        with st.spinner("Analyzing..."):
+        with st.spinner("Thinking..."):
             try:
-                # 1. SEND USER MESSAGE (WITH RETRY)
                 response = send_message_with_retry(st.session_state.chat_session, prompt)
                 text = response.text
                 
-                # --- TRIGGER: LOAD PDF ---
                 if "LOAD(" in text:
                     persona = text.split("LOAD(")[1].split(")")[0]
                     if st.session_state.loaded_persona != persona:
                         file_ref = inject_knowledge(persona)
                         if file_ref:
-                            # 2. INJECT FILE & RESTART
                             hist = st.session_state.chat_session.history[:-1]
                             hist.append({"role": "user", "parts": [file_ref, "Rules loaded."]})
                             hist.append({"role": "model", "parts": ["Understood."]})
-                            
                             model = genai.GenerativeModel('gemini-2.0-flash', system_instruction=sys_instruction)
                             st.session_state.chat_session = model.start_chat(history=hist)
                             st.session_state.loaded_persona = persona
                             
-                            st.toast(f"📚 Loaded {persona} Rules", icon="✅")
-                            
-                            # 3. AUTO-CONTINUE (WITH RETRY & DELAY)
-                            time.sleep(2) # Cooldown
-                            response = send_message_with_retry(st.session_state.chat_session, "Rules loaded. Please ask the next question.")
+                            st.toast(f"📚 Context Loaded: {persona}", icon="✅")
+                            time.sleep(2)
+                            # Gentle Re-prompt
+                            response = send_message_with_retry(st.session_state.chat_session, "Context loaded. Please gently ask for their Age now.")
                             text = response.text
 
-                # --- TRIGGER: CALCULATE ---
                 if "CALCULATE(" in text:
                     try:
                         params = text.split("CALCULATE(")[1].split(")")[0]
@@ -215,7 +214,7 @@ else:
                         savings = abs(tn - to)
                         
                         st.chat_message("assistant", avatar="🤖").markdown(f"""
-                        ### 🧾 Tax Analysis
+                        ### 🧾 Your Tax Report
                         **Recommendation:** Go with **{winner}** (Save ₹{savings:,})
                         
                         | | **New Regime** | **Old Regime** |
@@ -223,7 +222,6 @@ else:
                         | Taxable Income | ₹{net_new:,} | ₹{net_old:,} |
                         | **Total Tax** | **₹{tn:,}** | **₹{to:,}** |
                         """)
-                        
                         st.session_state.chat_session.history.append({"role": "model", "parts": [f"Result: New={tn}, Old={to}"]})
                     except: st.error("Calculation Failed")
 
