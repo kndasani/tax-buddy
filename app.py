@@ -15,7 +15,21 @@ if not api_key:
 
 genai.configure(api_key=api_key)
 
-# --- 2. SMART KNOWLEDGE LOADER ---
+# --- 2. HELPER: RETRY LOGIC (Crucial for 429 Errors) ---
+def send_message_with_retry(chat_session, prompt, retries=3):
+    """Wraps the API call with a safety delay"""
+    for i in range(retries):
+        try:
+            return chat_session.send_message(prompt)
+        except Exception as e:
+            if "429" in str(e):
+                time.sleep(2 ** (i + 1)) # Wait 2s, 4s, 8s...
+                continue
+            else:
+                raise e
+    raise Exception("⚠️ Server busy. Please wait 1 minute.")
+
+# --- 3. SMART KNOWLEDGE LOADER ---
 @st.cache_resource
 def get_pdf_file(filename):
     if os.path.exists(filename):
@@ -32,7 +46,7 @@ def inject_knowledge(persona_type):
     elif persona_type == "CAPITAL_GAINS": return get_pdf_file("capital_gains.pdf")
     return None
 
-# --- 3. CALCULATOR ENGINE ---
+# --- 4. CALCULATOR ENGINE ---
 def calculate_tax_detailed(age, salary, business_income, rent_paid, inv_80c, med_80d):
     std_deduction_new = 75000; std_deduction_old = 50000
     
@@ -70,7 +84,7 @@ def compute_tax(income, age, regime):
         if income <= 500000: tax = 0
     return int(tax * 1.04)
 
-# --- 4. THE BRAIN ---
+# --- 5. THE BRAIN ---
 sys_instruction = """
 You are "TaxGuide AI". 
 **Goal:** Discover user needs, LOAD rules dynamically, then Guide.
@@ -89,7 +103,7 @@ You are "TaxGuide AI".
    - Output: `CALCULATE(age=..., salary=..., business=..., rent=..., inv80c=..., med80d=...)`
 """
 
-# --- 5. UI HEADER ---
+# --- 6. UI HEADER ---
 col1, col2 = st.columns([5, 1])
 with col1: st.markdown("### 🇮🇳 TaxGuide AI")
 with col2: 
@@ -97,7 +111,7 @@ with col2:
         st.session_state.clear()
         st.rerun()
 
-# --- 6. FORK LOGIC ---
+# --- 7. FORK LOGIC ---
 if "mode" not in st.session_state:
     st.session_state.mode = None
     st.session_state.chat_session = None
@@ -112,50 +126,38 @@ if st.session_state.mode is None:
     with c1:
         if st.button("💰 Calculate My Tax", use_container_width=True):
             st.session_state.mode = "CALC"
-            # Start Chat WITHOUT PDFs (Fast Load)
             model = genai.GenerativeModel('gemini-2.0-flash', system_instruction=sys_instruction)
             st.session_state.chat_session = model.start_chat(history=[])
-            # First AI Message
             st.session_state.chat_session.history.append({"role": "model", "parts": ["Let's calculate! First, how do you earn your income? (Salary, Business, or both?)"]})
             st.rerun()
             
     with c2:
         if st.button("📚 Ask Tax Rules", use_container_width=True):
             st.session_state.mode = "RULES"
-            # Start Chat WITHOUT PDFs
             model = genai.GenerativeModel('gemini-2.0-flash', system_instruction=sys_instruction)
             st.session_state.chat_session = model.start_chat(history=[])
-            # First AI Message
             st.session_state.chat_session.history.append({"role": "model", "parts": ["I can explain tax rules. Which topic? (Salary, Freelancing, Capital Gains?)"]})
             st.rerun()
 
 # SCREEN 2: THE CHAT INTERFACE
 else:
-    # --- SAFE DISPLAY HISTORY LOOP (Fixes the Crash) ---
+    # --- SAFE DISPLAY HISTORY LOOP ---
     for msg in st.session_state.chat_session.history:
-        # 1. SAFELY EXTRACT TEXT & ROLE
         text = ""
         role = ""
-        
-        # Check if it's a Dictionary (Manual Append)
         if isinstance(msg, dict):
             role = msg.get("role")
             parts = msg.get("parts", [])
             if parts:
-                # Handle list of parts which might be strings or objects
                 first = parts[0]
-                if isinstance(first, str):
-                    text = first
-                elif hasattr(first, "text"): # If it's a file/part object
-                    text = first.text
-        # Check if it's a proper Object (SDK standard)
+                if isinstance(first, str): text = first
+                elif hasattr(first, "text"): text = first.text
         else:
             role = msg.role
             text = msg.parts[0].text
 
-        # 2. FILTER & DISPLAY
         if text and "LOAD" not in text:
-            if "Result:" not in text: # We show result via card, not text
+            if "Result:" not in text:
                 role_name = "user" if role == "user" else "assistant"
                 avatar = "👤" if role == "user" else "🤖"
                 with st.chat_message(role_name, avatar=avatar):
@@ -167,7 +169,8 @@ else:
         
         with st.spinner("Analyzing..."):
             try:
-                response = st.session_state.chat_session.send_message(prompt)
+                # 1. SEND USER MESSAGE (WITH RETRY)
+                response = send_message_with_retry(st.session_state.chat_session, prompt)
                 text = response.text
                 
                 # --- TRIGGER: LOAD PDF ---
@@ -176,19 +179,20 @@ else:
                     if st.session_state.loaded_persona != persona:
                         file_ref = inject_knowledge(persona)
                         if file_ref:
-                            # Inject File
-                            hist = st.session_state.chat_session.history[:-1] # Remove LOAD cmd
+                            # 2. INJECT FILE & RESTART
+                            hist = st.session_state.chat_session.history[:-1]
                             hist.append({"role": "user", "parts": [file_ref, "Rules loaded."]})
                             hist.append({"role": "model", "parts": ["Understood."]})
                             
-                            # Restart
                             model = genai.GenerativeModel('gemini-2.0-flash', system_instruction=sys_instruction)
                             st.session_state.chat_session = model.start_chat(history=hist)
                             st.session_state.loaded_persona = persona
                             
-                            # Continue Flow
                             st.toast(f"📚 Loaded {persona} Rules", icon="✅")
-                            response = st.session_state.chat_session.send_message("Rules loaded. Please ask the next question.")
+                            
+                            # 3. AUTO-CONTINUE (WITH RETRY & DELAY)
+                            time.sleep(2) # Cooldown
+                            response = send_message_with_retry(st.session_state.chat_session, "Rules loaded. Please ask the next question.")
                             text = response.text
 
                 # --- TRIGGER: CALCULATE ---
