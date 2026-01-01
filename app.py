@@ -5,13 +5,19 @@ import time
 from dotenv import load_dotenv
 
 # --- CONFIGURATION ---
-load_dotenv() # Load environment variables
-st.set_page_config(page_title="TaxGuide AI", page_icon="🇮🇳")
-api_key = os.getenv("GEMINI_API_KEY") 
+load_dotenv() # Load local .env file
+
+# Try getting key from Environment (Local) OR Streamlit Secrets (Cloud)
+api_key = os.getenv("GEMINI_API_KEY")
 
 if not api_key:
-    st.error("🔑 API Key Missing! Please set GEMINI_API_KEY in your .env file or secrets.")
-    st.stop()
+    try:
+        # Check Streamlit Cloud Secrets
+        api_key = st.secrets["GEMINI_API_KEY"]
+    except FileNotFoundError:
+        # If neither works, stop
+        st.error("🔑 API Key Missing! Please add 'GEMINI_API_KEY' to your .env file (local) or Streamlit Secrets (cloud).")
+        st.stop()
 
 genai.configure(api_key=api_key)
 
