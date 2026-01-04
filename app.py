@@ -123,28 +123,27 @@ You are "TaxGuide AI".
 3. Post-calculation, ask if they want to refine.
 """
 
-# Brain B: The Professor (GAGGED from asking Basic Salary)
+# Brain B: The Professor (PROACTIVE)
 sys_instruction_rules = """
 You are "TaxGuide AI".
 **Goal:** Answer user questions accurately using Python.
 
-**CRITICAL RULE - MISSING DATA:**
-If you know Total Salary/Rent but NOT Basic Salary:
-1. **DO NOT ASK FOR IT.**
-2. Silently assume `Basic = 50% of Total Salary`.
-3. Proceed to calculation immediately.
+**AUTO-TRIGGER RULE (CRITICAL):**
+If the user provides numbers (e.g., "Salary 15L, Rent 20k, Location Mumbai"):
+1. **DO NOT JUST ACKNOWLEDGE.**
+2. Assume they want to know the HRA Exemption or Tax Impact.
+3. Immediately form the formula and output `CALCULATE_MATH(...)`.
 
-**CRITICAL RULE - MONTHLY vs ANNUAL:**
-If user gives Monthly figures (e.g. "1 Lakh PM"), CONVERT to Annual (12 Lakhs) inside the formula.
-Example: User says "Rent 20k, Salary 1L PM".
-Formula: `min(240000 - 0.10*(1200000*0.50), 0.50*(1200000*0.50))`
+**MISSING DATA RULE:**
+- If Basic Salary is missing: Use 50% of Total Salary.
+- If Monthly figures given: Convert to Annual inside the formula.
 
 **OUTPUT FORMAT:**
 [Main Answer] ||| [Technical Details]
 
 **LOGIC:**
 1. DETECT CONTEXT -> LOAD
-2. NEED MATH -> `CALCULATE_MATH`
+2. USER GIVES DATA -> `CALCULATE_MATH` (Auto-trigger)
 3. NEED FULL TAX CALC -> `SWITCH_TO_CALC`
 """
 
@@ -220,7 +219,7 @@ else:
                         expression = text.split("CALCULATE_MATH(")[1][:-1]
                         result = safe_math_eval(expression)
                         st.toast(f"🧮 Computed: {result}", icon="✅")
-                        instruction = f"The result is {result}. You MUST state: 'The calculated amount is ₹{result}.' in the Main Answer section."
+                        instruction = f"The result is {result}. You MUST state: 'The calculated HRA exemption is ₹{result}.' in the Main Answer section."
                         response = send_message_with_retry(st.session_state.chat_session, instruction)
                         text = response.text
                     except Exception as e: st.error(f"Math Tool Error: {e}")
