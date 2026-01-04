@@ -52,26 +52,20 @@ def inject_knowledge(persona_type):
 def safe_math_eval(expression):
     """Robust Math Tool for Spot Checks"""
     try:
-        # Strip labels like "Salary:" or "x="
         if ":" in expression: expression = expression.split(":")[-1]
         if "=" in expression: expression = expression.split("=")[-1]
         
-        # Normalize
         expression = expression.lower().strip()
         expression = expression.replace("\n", " ").replace("\t", " ") 
         expression = expression.replace("`", "").replace("₹", "")       
         expression = expression.replace("%", "*0.01").replace("^", "**")     
         
-        # Balance Parentheses
         open_c = expression.count('(')
         close_c = expression.count(')')
         if open_c > close_c: expression += ')' * (open_c - close_c)
         elif close_c > open_c: expression = expression.rstrip(')')
         
-        # Handle commas inside numbers vs args
         expression = re.sub(r'(\d),(\d)', r'\1\2', expression)
-        
-        # Security Whitelist
         allowed = set("0123456789+-*/()., <>=abcdefhilmnorstuwx")
         if not set(expression).issubset(allowed): return "Error: Unsafe characters"
 
@@ -85,12 +79,8 @@ def safe_math_eval(expression):
 def calculate_tax_detailed(age, salary, business_income, rent_paid, inv_80c, med_80d, custom_basic=0):
     """Full Tax Regime Calculator"""
     std_deduction_new = 75000; std_deduction_old = 50000
-    
-    # Smart Basic Logic: If not provided, assume 50% of Salary
     basic = custom_basic if custom_basic > 0 else (salary * 0.50)
-    
     taxable_business = business_income * 0.50
-    # HRA Rule: min(Actual HRA, Rent-10%Basic, 50%Basic) - Simplified here to max benefit
     hra_exemption = max(0, rent_paid * 12 - (0.10 * basic))
     
     gross = salary + taxable_business
@@ -140,7 +130,7 @@ You are "TaxGuide AI", a smart Indian Tax Expert.
 
 **YOUR PRIME DIRECTIVE:**
 1. **Be Proactive:** If the user gives numbers, **CALCULATE**. Do not wait for a question.
-2. **Be Robust:** If data is missing (e.g., Basic Salary), **ASSUME** standard defaults (Basic=50%) and proceed. Do not ask for it.
+2. **Be Robust:** If data is missing (e.g., Basic Salary), **ASSUME** standard defaults (Basic=50%) and proceed.
 3. **Be Consistent:** Use the tools provided. Never calculate in your head.
 
 **TOOL USAGE RULES:**
@@ -149,7 +139,6 @@ A. **FULL TAX CALCULATION** (Use `CALCULATE(...)`)
    - Trigger: User asks for "Total Tax", "Old vs New", or provides a Salary context.
    - **CRITICAL:** Check for Rent, HRA, and Investments in the user's text.
    - If User says "Rent 20k", you MUST send `rent=20000` (Monthly) or `rent=240000` (Yearly).
-   - Do NOT send `rent=0` if the user mentioned rent.
 
 B. **SPOT CHECK MATH** (Use `CALCULATE_MATH(...)`)
    - Trigger: Specific questions like "What is my HRA exemption?" or "Tax on 10L LTCG".
@@ -190,12 +179,27 @@ def render_message(text, role, avatar):
         else:
             st.markdown(text)
 
+# --- SAFE HISTORY ITERATION FIX (Line 192) ---
 for msg in st.session_state.chat_session.history:
-    text = msg.parts[0].text if msg.parts else ""
-    role = "user" if msg.role == "user" else "assistant"
+    text = ""
+    role_label = ""
+    
+    # CASE 1: Handle Manual Dictionary entries
+    if isinstance(msg, dict):
+        role_label = msg.get("role")
+        parts = msg.get("parts", [])
+        if parts: text = parts[0]
+        
+    # CASE 2: Handle Gemini Objects
+    else:
+        role_label = msg.role
+        if msg.parts: text = msg.parts[0].text
+    
+    role_icon = "👤" if role_label == "user" else "🤖"
+    
     # Hide tool triggers from UI
     if text and not any(x in text for x in ["CALCULATE(", "CALCULATE_MATH(", "LOAD(", "Result:"]):
-        render_message(text, role, "👤" if role == "user" else "🤖")
+        render_message(text, role_label, role_icon)
 
 if prompt := st.chat_input("Ex: Salary 15L, Rent 20k..."):
     st.chat_message("user", avatar="👤").markdown(prompt)
