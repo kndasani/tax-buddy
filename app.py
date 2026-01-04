@@ -49,29 +49,25 @@ def inject_knowledge(persona_type):
 
 # --- 4. CALCULATOR ENGINE ---
 
-# Core 1: The Robust Math Engine
+# Core 1: The Robust Math Engine (Patched for Markdown)
 def safe_math_eval(expression):
     try:
         # 1. Cleaning & Normalization
         expression = expression.lower()
-        expression = expression.replace("\n", " ").replace("\t", " ") # Kill newlines
-        expression = expression.replace("₹", "")       # Remove currency symbols
-        expression = expression.replace("%", "*0.01")  # "10%" -> "10*0.01"
-        expression = expression.replace("^", "**")     # "10^2" -> "10**2"
+        expression = expression.replace("\n", " ").replace("\t", " ") 
+        expression = expression.replace("`", "")       # <--- FIX: Remove markdown backticks
+        expression = expression.replace("₹", "")       
+        expression = expression.replace("%", "*0.01")  
+        expression = expression.replace("^", "**")     
         
         # 2. Smart Comma Handling
         # Remove commas inside numbers (e.g., 1,00,000 -> 100000)
-        # But KEEP commas between arguments (e.g., min(a, b))
         expression = re.sub(r'(\d),(\d)', r'\1\2', expression)
         
         # 3. Whitelist Validation
-        # Allowed: digits, operators, parens, dot, space, comma, <, >, =
-        # Allowed letters for functions: a,b,c,d,e,f,h,i,l,m,n,o,p,r,s,t,u,w,x
-        # Covers: min, max, abs, round, int, float, pow, ceil, floor
         allowed_chars = set("0123456789+-*/()., <>=abcdefhilmnorstuwx")
         
         if not set(expression).issubset(allowed_chars):
-            # Debug: Find what triggered the error
             bad_chars = set(expression) - allowed_chars
             return f"Error: Unsafe characters found: {bad_chars}"
 
