@@ -118,7 +118,7 @@ def calculate_tax_detailed(age, salary, business_income, rent_paid, inv_80c, med
                 "std": std_deduction_old, 
                 "hra": hra_exemption, 
                 "80c": min(inv_80c, 150000), 
-                "80d": med_80d,
+                "80d": med_80d, # Key is "80d"
                 "home_loan": deduction_home_loan,
                 "nps": deduction_nps,
                 "80e": deduction_80e,
@@ -229,7 +229,6 @@ else:
             if "|||" in text:
                 summary, details = text.split("|||", 1)
                 st.markdown(summary.strip())
-                # Only show expander if there is actually content
                 if len(details.strip()) > 5:
                     with st.expander("📝 View Details & Assumptions"):
                         st.markdown(details.strip())
@@ -301,7 +300,6 @@ else:
                     )
                     tn, to = res['new']['breakdown']['total'], res['old']['breakdown']['total']
                     
-                    # Determine Winner
                     if tn < to:
                         winner = "New Regime"
                         savings = to - tn
@@ -311,7 +309,6 @@ else:
                         savings = tn - to
                         color = "blue"
                     
-                    # Highlight Assumptions
                     assumed_text = ""
                     if d['rent'] == 0: assumed_text += "- **Rent:** ₹0 (Assumed)\n"
                     if d['inv80c'] == 0: assumed_text += "- **80C Investments:** ₹0 (Assumed)\n"
@@ -326,7 +323,7 @@ else:
                     **:trophy: Winner:** :{color}[**{winner}**] saves you **₹{savings:,}**
                     
                     ---
-                    **⚠️ Current Assumptions (Used for Calculation):**
+                    **⚠️ Current Assumptions:**
                     {assumed_text}
                     *To reduce your tax, I can guide you through these missing deductions.*
                     
@@ -337,7 +334,7 @@ else:
                     *  **HRA Exemption:** ₹{res['old']['deductions']['hra']:,}
                     *  **80C (PF/PPF):** ₹{res['old']['deductions']['80c']:,}
                     *  **Home Loan Interest:** ₹{res['old']['deductions']['home_loan']:,}
-                    * **Health Ins (80D):** ₹{res['old']['deductions']['med80d']:,}
+                    * **Health Ins (80D):** ₹{res['old']['deductions']['80d']:,}
                     * **NPS:** ₹{res['old']['deductions']['nps']:,}
                     """
                     st.chat_message("assistant", avatar="🤖").markdown(report.split("|||")[0])
@@ -345,7 +342,6 @@ else:
                     
                     st.session_state.chat_session.history.append({"role": "model", "parts": [f"Result shown: New={tn}, Old={to}"]})
 
-                # Normal Text Response
                 if not any(x in text for x in ["CALCULATE(", "CALCULATE_MATH(", "LOAD(", "Result:"]):
                     render_message(text, "assistant", "🤖")
 
