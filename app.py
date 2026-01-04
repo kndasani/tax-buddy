@@ -46,17 +46,28 @@ def inject_knowledge(persona_type):
     elif persona_type == "CAPITAL_GAINS": return get_pdf_file("capital_gains.pdf")
     return None
 
-# --- 4. CALCULATOR ENGINE (The Dual-Core) ---
+# --- 4. CALCULATOR ENGINE ---
 
-# Core 1: The Generic Math Engine (Safe Eval)
+# Core 1: The Robust Math Engine (Fixed)
 def safe_math_eval(expression):
     try:
-        # Sanitize: Allow only safe characters
-        allowed_chars = set("0123456789+-*/()., minaxbsound ")
+        # 1. Clean up common LLM formatting issues
+        expression = expression.replace(",", "")       # Remove commas: "1,00,000" -> "100000"
+        expression = expression.replace("%", "*0.01")  # Fix percents: "10%" -> "10*0.01"
+        expression = expression.replace("^", "**")     # Fix power: "10^2" -> "10**2"
+        
+        # 2. Whitelist characters
+        # digits, operators, brackets, dot, space
+        # letters needed for: min, max, abs, round
+        # Unique letters: a, b, d, i, m, n, o, r, s, u, x
+        allowed_chars = set("0123456789+-*/(). abdimnorsux")
+        
         if not set(expression).issubset(allowed_chars):
-            return "Error: Unsafe characters."
+            return "Error: Unsafe characters in formula."
+        
         safe_dict = {"min": min, "max": max, "abs": abs, "round": round}
         result = eval(expression, {"__builtins__": None}, safe_dict)
+        
         if isinstance(result, (int, float)):
             return f"{int(result):,}"
         return str(result)
@@ -113,39 +124,35 @@ def compute_tax_breakdown(income, age, regime):
     total = int(tax + surcharge + cess)
     return {"base": int(tax), "surcharge": int(surcharge), "cess": int(cess), "total": total}
 
-# --- 5. THE TWO BRAINS (The Fix) ---
+# --- 5. THE TWO BRAINS ---
 
-# Brain A: Calculator (FAST TRACK ENABLED)
+# Brain A: Calculator
 sys_instruction_calc = """
 You are "TaxGuide AI". 
 **Goal:** Interview the user. Be helpful.
 
-**FAST TRACK RULE (CRITICAL):**
-If the user provides just an Income figure (e.g., "Tax on 15L") and asks for calculation:
-1. DO NOT ask for a full breakdown (HRA, 80C) immediately.
-2. Assume: Age=30, Rent=0, Deductions=0, Basic=50%.
-3. **CALCULATE IMMEDIATELY** with these defaults.
-4. After showing the result, ask: "That's the tax without deductions. Want to add Rent or Investments to lower it?"
+**FAST TRACK RULE:**
+If User gives ONLY Income (e.g., "Tax on 15L"):
+1. Assume Age=30, Rent=0, Deductions=0, Basic=50%.
+2. **CALCULATE IMMEDIATELY**.
+3. Then ask: "Want to add deductions?"
 
-**MEMORY RULE:** - If user provides a Salary, REMEMBER IT. 
-- If details (Basic/HRA) are missing, Estimate Basic = 50% of Salary.
+**MEMORY RULE:** - Remember stated salary. - Estimate Basic = 50% if unknown.
 
 **LOGIC FLOW:**
 1. START: Ask Income Source.
 2. DETECT & LOAD.
-3. INTERVIEW: 
-   - If User gives FULL details -> Use them.
-   - If User gives ONLY Income -> **CALCULATE** (Fast Track).
+3. INTERVIEW -> CALCULATE.
 """
 
-# Brain B: The Professor (Assumption Friendly)
+# Brain B: The Professor
 sys_instruction_rules = """
 You are "TaxGuide AI".
 **Goal:** Answer user questions comprehensively.
 
 **CRITICAL RULE - MATH TOOL:**
 Use `CALCULATE_MATH(expression)` for all spot checks.
-- If user inputs are partial (e.g., "HRA on 20k rent"), **ASSUME** a standard Basic Salary (e.g., 50% of a typical income) to provide an answer. Do not refuse. State your assumption.
+- If inputs are partial, **ASSUME** standard values (e.g., Basic=50%) to give an answer. State the assumption.
 
 **OUTPUT FORMAT:**
 [Main Answer] ||| [Technical Details]
@@ -223,7 +230,7 @@ else:
                 response = send_message_with_retry(st.session_state.chat_session, prompt)
                 text = response.text
                 
-                # --- TOOL: MATH ---
+                # --- TOOL: MATH (Robust) ---
                 if "CALCULATE_MATH(" in text:
                     try:
                         expression = text.split("CALCULATE_MATH(")[1][:-1]
