@@ -118,7 +118,7 @@ def calculate_tax_detailed(age, salary, business_income, rent_paid, inv_80c, med
                 "std": std_deduction_old, 
                 "hra": hra_exemption, 
                 "80c": min(inv_80c, 150000), 
-                "80d": med_80d,
+                "med80d": med80d, # <--- FIXED KEY NAME
                 "home_loan": deduction_home_loan,
                 "nps": deduction_nps,
                 "80e": deduction_80e,
@@ -165,14 +165,15 @@ You are "TaxGuide AI".
 **PHASE 1: THE QUICK SCAN**
 1. **Trigger:** User gives Salary.
 2. **Action:** `CALCULATE(...)` immediately.
-3. **Message:** "I've estimated your tax. I assumed 0 investments. Want to optimize?"
+3. **Message:** "I've estimated your tax based on Salary. Defaults used for the rest."
+4. **Follow-up:** "Reply with 'PF 1L', 'Rent 20k', etc. to customize."
 
 **PHASE 2: THE AUDIT**
-1. **Trigger:** User updates data (e.g., "PF 1L", "Rent 20k").
+1. **Trigger:** User updates data.
 2. **Action:** `CALCULATE(...)` with new data.
 
 **RULES:**
-- **Calculations:** Use the tool. Do not hallucinate numbers.
+- **Calculations:** Use the tool.
 - **Monthly:** x12 internally.
 
 **OUTPUT FORMAT:**
@@ -304,8 +305,14 @@ else:
                         # 3. Detailed Financial Table
                         st.markdown("### 🧾 Detailed Breakdown")
                         
+                        # Calculate Other total properly
+                        other_total = (res['old']['deductions']['80e'] + 
+                                       res['old']['deductions']['80g'] + 
+                                       res['old']['deductions']['80tta'] + 
+                                       res['old']['deductions']['other'])
+
                         table_data = {
-                            "Item": ["Gross Salary", "HRA Exemption ", "Standard Deduction", "80C (PF/LIC/PPF) ", "NPS (80CCD) ", "Home Loan Interest ", "Health Ins (80D)", "Other Deductions", "Taxable Income", "Net Tax Payable"],
+                            "Item": ["Gross Salary", "HRA Exemption ", "Standard Deduction", "80C (PF/LIC/PPF) ", "NPS (80CCD) ", "Home Loan Interest ", "Health Ins (80D)", "Other (Edu/Donations/Int)", "Taxable Income", "Net Tax Payable"],
                             "New Regime": [
                                 f"₹{d['salary']:,}", "₹0", "₹75,000", "₹0", "₹0", "₹0", "₹0", "₹0",
                                 f"₹{res['new']['net']:,}", f"₹{tn:,}"
@@ -318,7 +325,7 @@ else:
                                 f"₹{res['old']['deductions']['nps']:,}", 
                                 f"₹{res['old']['deductions']['home_loan']:,}", 
                                 f"₹{res['old']['deductions']['med80d']:,}", 
-                                f"₹{res['old']['deductions']['80e'] + res['old']['deductions']['80g'] + res['old']['deductions']['other']:,}",
+                                f"₹{other_total:,}",
                                 f"₹{res['old']['net']:,}", 
                                 f"₹{to:,}"
                             ]
