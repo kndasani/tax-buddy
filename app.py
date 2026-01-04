@@ -67,51 +67,32 @@ def safe_math_eval(expression):
     except Exception as e: return f"Error ({e})"
 
 def calculate_hra_exemption(basic_annual, rent_annual, hra_received_annual, metro=True):
-    """
-    Calculates HRA Exemption based on the 3 limits:
-    1. Actual HRA Received
-    2. Rent Paid - 10% of Basic
-    3. 50% of Basic (Metro)
-    """
-    # Limit 1: Actual HRA
     cond1 = hra_received_annual
-    
-    # Limit 2: Rent - 10% Basic
     cond2 = rent_annual - (0.10 * basic_annual)
-    
-    # Limit 3: 50% Basic (Metro)
     cond3 = (0.50 if metro else 0.40) * basic_annual
-    
     exemption = max(0, min(cond1, cond2, cond3))
     return int(exemption)
 
 def calculate_tax_detailed(age, salary, business_income, rent_paid, hra_received, inv_80c, med_80d, home_loan, nps, edu_loan, donations, savings_int, other_deductions, custom_basic=0):
     std_deduction_new = 75000; std_deduction_old = 50000
     
-    # 1. Basic Salary Logic
     basic = 0
     if custom_basic > 0:
         if custom_basic < 100: basic = salary * (custom_basic / 100.0)
         else: basic = custom_basic
     else:
-        basic = salary * 0.50 # Default assumption
+        basic = salary * 0.50 
 
-    # 2. HRA Received Logic
-    # If user didn't specify HRA Received, we assume 40% of Basic (Safe default)
     final_hra_received = hra_received
     if hra_received == 0:
         final_hra_received = basic * 0.40
 
-    # 3. Rent Logic (Monthly -> Annual)
     final_rent = rent_paid
     if rent_paid > 0 and rent_paid < (salary * 0.15):
         final_rent = rent_paid * 12 
 
-    # 4. Calculate HRA Exemption
-    # FIXED: Now passing all 3 required arguments + metro flag
     hra_exemption = calculate_hra_exemption(basic, final_rent, final_hra_received, metro=True) 
     
-    # 5. Other Deductions
     limit_80tta = 50000 if age >= 60 else 10000
     deduction_80tta = min(savings_int, limit_80tta)
     deduction_80e = edu_loan
@@ -191,27 +172,20 @@ def compute_tax_breakdown(income, age, regime):
 sys_instruction_unified = """
 You are "TaxGuide AI".
 
-**PHASE 1: THE QUICK SCAN**
-1. **Trigger:** User gives Salary.
-2. **Action:** `CALCULATE(...)` immediately using defaults.
-3. **Message:** "I've estimated your tax based on Salary. Defaults used for the rest."
-4. **Follow-up:** "Reply with 'PF 1L', 'Rent 20k', 'HRA Received 3L' etc. to customize."
+**PRIME DIRECTIVE:**
+If the user provides a Salary amount (e.g., "15L", "20k/month"), you **MUST** output the `CALCULATE(...)` tool command IMMEDIATELY.
+**DO NOT** write a text response saying "I have estimated...".
+**DO NOT** explain your assumptions in text.
+**JUST RUN THE TOOL.**
 
-**PHASE 2: THE AUDIT**
-1. **Trigger:** User updates data.
-2. **Action:** `CALCULATE(...)` with new data.
-
-**NEGATIVE CONSTRAINTS (DO NOT IGNORE):**
-- **NEVER output Python code blocks.**
-- **NEVER define classes or functions in your response.**
-- **ALWAYS use the tools provided.**
-
-**DATA PARSING RULES:**
-- **"HRA" vs "Rent":** If user says "HRA is 20k", put it in `hra_received`. If "Rent is 20k", put it in `rent`.
-- **Monthly:** x12 internally.
+**DATA PARSING:**
+- "HRA is 20k" -> `hra_received=20000`
+- "Rent is 20k" -> `rent=20000`
+- "PF is 50k" -> `inv80c=50000`
+- "Home Loan 2L" -> `home_loan=200000`
 
 **OUTPUT FORMAT:**
-[Summary Text]
+CALCULATE(salary=..., rent=..., ...)
 """
 
 # --- 6. UI SETUP ---
@@ -320,7 +294,6 @@ else:
                     winner = "New Regime" if tn < to else "Old Regime"
                     savings = abs(tn - to)
 
-                    # --- NATIVE UI RENDERER ---
                     with st.chat_message("assistant", avatar="🤖"):
                         st.subheader("📊 Tax Analysis")
                         
@@ -362,24 +335,17 @@ else:
                         }
                         st.table(table_data)
                         
-                        # 4. Assumptions Check
                         assumptions = []
                         if d['rent'] == 0: assumptions.append("Rent: ₹0")
                         if d['inv80c'] == 0: assumptions.append("80C: ₹0")
-                        if d['home_loan'] == 0: assumptions.append("Home Loan: ₹0")
-                        
-                        used_basic = res['old']['assumptions']['basic']
-                        used_hra_rec = res['old']['assumptions']['hra_received']
                         
                         if assumptions:
                             st.caption(f"⚠️ **Assumed 0 for:** {', '.join(assumptions)}")
                         
-                        st.caption(f"*Calculated based on Basic: ₹{used_basic:,} & HRA Received: ₹{used_hra_rec:,}*")
-                        st.caption("*Tip: Reply with 'HRA Received 3L' or 'Basic 40%' to refine.*")
+                        st.caption(f"*Calculated based on Basic: ₹{res['old']['assumptions']['basic']:,}*")
 
                     st.session_state.chat_session.history.append({"role": "model", "parts": [f"Result shown: New={tn}, Old={to}"]})
 
-                # Normal Text Response
                 if not any(x in text for x in ["CALCULATE(", "CALCULATE_MATH(", "LOAD(", "Result:"]):
                     render_message(text, "assistant", "🤖")
 
