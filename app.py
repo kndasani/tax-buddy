@@ -118,7 +118,7 @@ def calculate_tax_detailed(age, salary, business_income, rent_paid, inv_80c, med
                 "std": std_deduction_old, 
                 "hra": hra_exemption, 
                 "80c": min(inv_80c, 150000), 
-                "80d": med_80d, # Key is "80d"
+                "80d": med_80d,
                 "home_loan": deduction_home_loan,
                 "nps": deduction_nps,
                 "80e": deduction_80e,
@@ -162,32 +162,21 @@ def compute_tax_breakdown(income, age, regime):
 sys_instruction_unified = """
 You are "TaxGuide AI".
 
-**PHASE 1: THE QUICK SCAN (Estimate)**
-1. **Trigger:** User gives Salary (or Salary + Rent).
-2. **Action:** `CALCULATE(...)` immediately using defaults for anything missing.
-3. **Post-Calc Message:**
-   - "I have calculated your tax based on your Salary (and Rent if provided)."
-   - "⚠️ **Note:** I assumed you have **0** other investments."
-   - "Would you like a **step-by-step guide** to input your investments (like PF, Insurance, Loans) to lower your tax?"
+**PHASE 1: THE QUICK SCAN**
+1. **Trigger:** User gives Salary.
+2. **Action:** `CALCULATE(...)` immediately.
+3. **Message:** "I've estimated your tax. I assumed 0 investments. Want to optimize?"
 
-**PHASE 2: THE GUIDED AUDIT (Step-by-Step)**
-1. **Trigger:** User says "Yes" or "Guide me".
-2. **Action:** Ask about **ONE** category at a time in **SIMPLE ENGLISH**.
-   - Q1: "Do you pay any **Rent**? If yes, how much per month?" (Skip if already known)
-   - Q2: "Do you contribute to **EPF, PPF, or Life Insurance**? (Limit: 1.5L)"
-   - Q3: "Do you pay for **Health Insurance** for yourself or parents?"
-   - Q4: "Do you have a **Home Loan** or **Education Loan**?"
-3. **After Each Answer:** Run `CALCULATE(...)` again to show the *new* tax savings immediately.
+**PHASE 2: THE AUDIT**
+1. **Trigger:** User updates data (e.g., "PF 1L", "Rent 20k").
+2. **Action:** `CALCULATE(...)` with new data.
 
-**CRITICAL RULES:**
-- **Monthly Math:** Automatically multiply monthly inputs by 12.
-- **No Jargon:** Don't say "Section 80CCD(1B)". Say "NPS".
-- **Tool Use:** ALWAYS use `CALCULATE` when numbers change.
+**RULES:**
+- **Calculations:** Use the tool. Do not hallucinate numbers.
+- **Monthly:** x12 internally.
 
 **OUTPUT FORMAT:**
-[Summary]
-|||
-[Technical Details]
+[Summary Text]
 """
 
 # --- 6. UI SETUP ---
@@ -226,14 +215,7 @@ if not st.session_state.chat_started:
 else:
     def render_message(text, role, avatar):
         with st.chat_message(role, avatar=avatar):
-            if "|||" in text:
-                summary, details = text.split("|||", 1)
-                st.markdown(summary.strip())
-                if len(details.strip()) > 5:
-                    with st.expander("📝 View Details & Assumptions"):
-                        st.markdown(details.strip())
-            else:
-                st.markdown(text)
+            st.markdown(text)
 
     # History Display
     for msg in st.session_state.chat_session.history:
@@ -283,7 +265,7 @@ else:
                             send_message_with_retry(st.session_state.chat_session, "Context loaded. Proceed.")
                             text = st.session_state.chat_session.history[-1].parts[0].text
 
-                # --- TOOL 3: FULL CALCULATOR ---
+                # --- TOOL 3: FULL CALCULATOR (WITH NATIVE UI) ---
                 if "CALCULATE(" in text:
                     params = text.split("CALCULATE(")[1].split(")")[0]
                     d = {"age":30, "salary":0, "business":0, "rent":0, "inv80c":0, "med80d":0, "basic":0, "home_loan":0, "nps":0, "edu_loan":0, "donations":0, "savings_int":0, "other":0}
@@ -300,48 +282,62 @@ else:
                     )
                     tn, to = res['new']['breakdown']['total'], res['old']['breakdown']['total']
                     
-                    if tn < to:
-                        winner = "New Regime"
-                        savings = to - tn
-                        color = "green"
-                    else:
-                        winner = "Old Regime"
-                        savings = tn - to
-                        color = "blue"
-                    
-                    assumed_text = ""
-                    if d['rent'] == 0: assumed_text += "- **Rent:** ₹0 (Assumed)\n"
-                    if d['inv80c'] == 0: assumed_text += "- **80C Investments:** ₹0 (Assumed)\n"
-                    if d['home_loan'] == 0: assumed_text += "- **Home Loan:** ₹0 (Assumed)\n"
-                    
-                    report = f"""
-                    ### 📊 Tax Comparison
-                    | | **New Regime** | **Old Regime** |
-                    | :--- | :--- | :--- |
-                    | **Total Tax** | **₹{tn:,}** | **₹{to:,}** |
-                    
-                    **:trophy: Winner:** :{color}[**{winner}**] saves you **₹{savings:,}**
-                    
-                    ---
-                    **⚠️ Current Assumptions:**
-                    {assumed_text}
-                    *To reduce your tax, I can guide you through these missing deductions.*
-                    
-                    ||| 
-                    **Detailed Breakdown:**
-                    * **Gross Income:** ₹{d['salary']:,}
-                    * **Standard Deduction:** ₹75,000 (New) / ₹50,000 (Old)
-                    *  **HRA Exemption:** ₹{res['old']['deductions']['hra']:,}
-                    *  **80C (PF/PPF):** ₹{res['old']['deductions']['80c']:,}
-                    *  **Home Loan Interest:** ₹{res['old']['deductions']['home_loan']:,}
-                    * **Health Ins (80D):** ₹{res['old']['deductions']['80d']:,}
-                    * **NPS:** ₹{res['old']['deductions']['nps']:,}
-                    """
-                    st.chat_message("assistant", avatar="🤖").markdown(report.split("|||")[0])
-                    with st.expander("📝 View Full Breakdown"): st.markdown(report.split("|||")[1])
-                    
+                    winner = "New Regime" if tn < to else "Old Regime"
+                    savings = abs(tn - to)
+
+                    # --- NATIVE UI RENDERER ---
+                    with st.chat_message("assistant", avatar="🤖"):
+                        st.subheader("📊 Tax Analysis")
+                        
+                        # 1. Metrics Row
+                        c1, c2, c3 = st.columns(3)
+                        c1.metric("New Regime Tax", f"₹{tn:,}")
+                        c2.metric("Old Regime Tax", f"₹{to:,}")
+                        c3.metric("Savings", f"₹{savings:,}", delta_color="normal" if winner=="New Regime" else "inverse")
+                        
+                        # 2. Winner Banner
+                        if winner == "New Regime":
+                            st.success(f"🏆 **Recommendation: New Regime** saves you **₹{savings:,}**")
+                        else:
+                            st.info(f"🏆 **Recommendation: Old Regime** saves you **₹{savings:,}**")
+
+                        # 3. Detailed Financial Table
+                        st.markdown("### 🧾 Detailed Breakdown")
+                        
+                        table_data = {
+                            "Item": ["Gross Salary", "HRA Exemption ", "Standard Deduction", "80C (PF/LIC/PPF) ", "NPS (80CCD) ", "Home Loan Interest ", "Health Ins (80D)", "Other Deductions", "Taxable Income", "Net Tax Payable"],
+                            "New Regime": [
+                                f"₹{d['salary']:,}", "₹0", "₹75,000", "₹0", "₹0", "₹0", "₹0", "₹0",
+                                f"₹{res['new']['net']:,}", f"₹{tn:,}"
+                            ],
+                            "Old Regime": [
+                                f"₹{d['salary']:,}", 
+                                f"₹{res['old']['deductions']['hra']:,}", 
+                                "₹50,000", 
+                                f"₹{res['old']['deductions']['80c']:,}", 
+                                f"₹{res['old']['deductions']['nps']:,}", 
+                                f"₹{res['old']['deductions']['home_loan']:,}", 
+                                f"₹{res['old']['deductions']['med80d']:,}", 
+                                f"₹{res['old']['deductions']['80e'] + res['old']['deductions']['80g'] + res['old']['deductions']['other']:,}",
+                                f"₹{res['old']['net']:,}", 
+                                f"₹{to:,}"
+                            ]
+                        }
+                        st.table(table_data)
+                        
+                        # 4. Assumptions Check
+                        assumptions = []
+                        if d['rent'] == 0: assumptions.append("Rent: ₹0")
+                        if d['inv80c'] == 0: assumptions.append("80C: ₹0")
+                        if d['home_loan'] == 0: assumptions.append("Home Loan: ₹0")
+                        
+                        if assumptions:
+                            st.caption(f"⚠️ **Assumed 0 for:** {', '.join(assumptions)}")
+                            st.caption("*Tip: Reply with 'Rent 20k' or 'PF 1L' to update these numbers.*")
+
                     st.session_state.chat_session.history.append({"role": "model", "parts": [f"Result shown: New={tn}, Old={to}"]})
 
+                # Normal Text Response
                 if not any(x in text for x in ["CALCULATE(", "CALCULATE_MATH(", "LOAD(", "Result:"]):
                     render_message(text, "assistant", "🤖")
 
