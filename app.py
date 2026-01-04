@@ -66,36 +66,50 @@ def safe_math_eval(expression):
         return str(result)
     except Exception as e: return f"Error ({e})"
 
-def calculate_hra_exemption(basic_annual, rent_annual, metro=True):
-    # Rule 1: Actual HRA Received (Assumed 50% of Basic if not strictly provided)
-    cond1 = basic_annual * 0.50 
+def calculate_hra_exemption(basic_annual, rent_annual, hra_received_annual, metro=True):
+    """
+    Calculates HRA Exemption based on the 3 limits.
+    1. Actual HRA Received.
+    2. Rent Paid - 10% of Basic.
+    3. 50% of Basic (Metro) / 40% (Non-Metro).
+    """
+    # Limit 1: Actual HRA
+    cond1 = hra_received_annual
     
-    # Rule 2: Rent Paid - 10% of Basic
+    # Limit 2: Rent - 10% Basic
     cond2 = rent_annual - (0.10 * basic_annual)
     
-    # Rule 3: 50% of Basic (Metro) or 40% (Non-Metro)
+    # Limit 3: 50% Basic (Metro)
     cond3 = (0.50 if metro else 0.40) * basic_annual
     
-    # Exemption is the LEAST of the three
     exemption = max(0, min(cond1, cond2, cond3))
     return int(exemption)
 
-def calculate_tax_detailed(age, salary, business_income, rent_paid, inv_80c, med_80d, home_loan, nps, edu_loan, donations, savings_int, other_deductions, custom_basic=0):
+def calculate_tax_detailed(age, salary, business_income, rent_paid, hra_received, inv_80c, med_80d, home_loan, nps, edu_loan, donations, savings_int, other_deductions, custom_basic=0):
     std_deduction_new = 75000; std_deduction_old = 50000
     
+    # 1. Basic Salary Logic
     basic = 0
     if custom_basic > 0:
         if custom_basic < 100: basic = salary * (custom_basic / 100.0)
         else: basic = custom_basic
     else:
-        basic = salary * 0.50 
+        basic = salary * 0.50 # Default assumption
 
+    # 2. HRA Received Logic
+    # If user didn't specify HRA Received, we assume a standard 40% of Basic.
+    final_hra_received = hra_received
+    if hra_received == 0:
+        final_hra_received = basic * 0.40
+
+    # 3. Rent Logic (Monthly -> Annual)
     final_rent = rent_paid
     if rent_paid > 0 and rent_paid < (salary * 0.15):
         final_rent = rent_paid * 12 
 
-    hra_exemption = calculate_hra_exemption(basic, final_rent)
+    hra_exemption = calculate_hra_exemption(basic, final_rent, final_hra_received, metro=True) # Assuming Metro (Bengaluru)
     
+    # 4. Other Deductions
     limit_80tta = 50000 if age >= 60 else 10000
     deduction_80tta = min(savings_int, limit_80tta)
     deduction_80e = edu_loan
@@ -135,7 +149,11 @@ def calculate_tax_detailed(age, salary, business_income, rent_paid, inv_80c, med
                 "80tta": deduction_80tta,
                 "other": other_deductions
             }, 
-            "assumptions": {"basic": basic, "rent_annual": final_rent}
+            "assumptions": {
+                "basic": basic, 
+                "rent_annual": final_rent,
+                "hra_received": final_hra_received
+            }
         }
     }
 
@@ -173,17 +191,17 @@ You are "TaxGuide AI".
 
 **PHASE 1: THE QUICK SCAN**
 1. **Trigger:** User gives Salary.
-2. **Action:** `CALCULATE(...)` immediately using defaults.
-3. **Message:** "I've estimated your tax based on Salary. Defaults used for the rest."
-4. **Follow-up:** "Reply with 'PF 1L', 'Rent 20k', etc. to customize."
+2. **Action:** `CALCULATE(...)` immediately.
+3. **Data Parsing:**
+   - Look for "HRA Received" or "HRA Allowance" -> map to `hra_received`.
+   - Look for "Rent Paid" -> map to `rent`.
+   - **Important:** If user says "My HRA is 20k", that usually means *HRA Received*.
+   - If user says "I pay 20k rent", that is *Rent Paid*.
+   - Distinguish between the two.
 
 **PHASE 2: THE AUDIT**
 1. **Trigger:** User updates data.
 2. **Action:** `CALCULATE(...)` with new data.
-
-**RULES:**
-- **Calculations:** Use the tool.
-- **Monthly:** x12 internally.
 
 **OUTPUT FORMAT:**
 [Summary Text]
@@ -278,7 +296,8 @@ else:
                 # --- TOOL 3: FULL CALCULATOR (WITH NATIVE UI) ---
                 if "CALCULATE(" in text:
                     params = text.split("CALCULATE(")[1].split(")")[0]
-                    d = {"age":30, "salary":0, "business":0, "rent":0, "inv80c":0, "med80d":0, "basic":0, "home_loan":0, "nps":0, "edu_loan":0, "donations":0, "savings_int":0, "other":0}
+                    # ADDED 'hra_received' to dictionary
+                    d = {"age":30, "salary":0, "business":0, "rent":0, "hra_received":0, "inv80c":0, "med80d":0, "basic":0, "home_loan":0, "nps":0, "edu_loan":0, "donations":0, "savings_int":0, "other":0}
                     for p in params.split(","):
                         if "=" in p:
                             k, v = p.split("=")
@@ -286,7 +305,7 @@ else:
                             if vc: d[k.strip()] = int(vc)
                     
                     res = calculate_tax_detailed(
-                        d['age'], d['salary'], d['business'], d['rent'], 
+                        d['age'], d['salary'], d['business'], d['rent'], d['hra_received'],
                         d['inv80c'], d['med80d'], d['home_loan'], d['nps'],
                         d['edu_loan'], d['donations'], d['savings_int'], d['other'], d['basic']
                     )
@@ -299,19 +318,16 @@ else:
                     with st.chat_message("assistant", avatar="🤖"):
                         st.subheader("📊 Tax Analysis")
                         
-                        # 1. Metrics Row
                         c1, c2, c3 = st.columns(3)
                         c1.metric("New Regime Tax", f"₹{tn:,}")
                         c2.metric("Old Regime Tax", f"₹{to:,}")
                         c3.metric("Savings", f"₹{savings:,}", delta_color="normal" if winner=="New Regime" else "inverse")
                         
-                        # 2. Winner Banner
                         if winner == "New Regime":
                             st.success(f"🏆 **Recommendation: New Regime** saves you **₹{savings:,}**")
                         else:
                             st.info(f"🏆 **Recommendation: Old Regime** saves you **₹{savings:,}**")
 
-                        # 3. Detailed Financial Table
                         st.markdown("### 🧾 Detailed Breakdown")
                         
                         other_total = (res['old']['deductions']['80e'] + 
@@ -346,9 +362,15 @@ else:
                         if d['inv80c'] == 0: assumptions.append("80C: ₹0")
                         if d['home_loan'] == 0: assumptions.append("Home Loan: ₹0")
                         
+                        # Show calculated/assumed HRA received
+                        used_basic = res['old']['assumptions']['basic']
+                        used_hra_rec = res['old']['assumptions']['hra_received']
+                        
                         if assumptions:
                             st.caption(f"⚠️ **Assumed 0 for:** {', '.join(assumptions)}")
-                            st.caption("*Tip: Reply with 'Rent 20k' or 'PF 1L' to update these numbers.*")
+                        
+                        st.caption(f"*Calculated based on Basic: ₹{used_basic:,} & HRA Received: ₹{used_hra_rec:,}*")
+                        st.caption("*Tip: Reply with 'HRA Received 3L' or 'Basic 40%' to refine.*")
 
                     st.session_state.chat_session.history.append({"role": "model", "parts": [f"Result shown: New={tn}, Old={to}"]})
 
