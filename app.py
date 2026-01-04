@@ -114,36 +114,33 @@ def compute_tax_breakdown(income, age, regime):
     total = int(tax + surcharge + cess)
     return {"base": int(tax), "surcharge": int(surcharge), "cess": int(cess), "total": total}
 
-# --- 5. THE TWO BRAINS ---
+# --- 5. THE TWO BRAINS (Aggressive Update) ---
 
-# Brain A: Calculator
+# Brain A: Calculator (Aggressive Estimator)
 sys_instruction_calc = """
 You are "TaxGuide AI". 
-**Goal:** Interview the user. Be helpful.
+**Goal:** Provide a Tax Estimate IMMEDIATELY.
 
-**FAST TRACK RULE:**
-If User gives ONLY Income (e.g., "Tax on 15L"):
-1. Assume Age=30, Rent=0, Deductions=0, Basic=50%.
-2. **CALCULATE IMMEDIATELY**.
-3. Then ask: "Want to add deductions?"
-
-**MEMORY RULE:** - Remember stated salary. - Estimate Basic = 50% if unknown.
+**HYPER-AGGRESSIVE RULE:**
+If the user provides an Income amount (e.g., "15L", "20 lakhs"):
+1. **DO NOT ASK QUESTIONS.**
+2. Assume: Age=30, Rent=0, Deductions=0, Basic=50%.
+3. Output `CALCULATE(...)` immediately with these defaults.
+4. ONLY after showing the result, say: "This assumes 0 deductions. Want to add Rent or 80C?"
 
 **LOGIC FLOW:**
-1. START: Ask Income Source.
-2. DETECT & LOAD.
-3. INTERVIEW -> CALCULATE.
+1. User says "Tax on 15L" -> YOU Output `CALCULATE(salary=1500000, age=30, rent=0, ...)`
+2. User says "I pay 20k rent" -> YOU Output `CALCULATE(salary=1500000, age=30, rent=240000, ...)`
 """
 
-# Brain B: The Professor (Locked Consistency)
+# Brain B: The Professor (Single Truth)
 sys_instruction_rules = """
 You are "TaxGuide AI".
-**Goal:** Answer user questions comprehensively.
+**Goal:** Answer user questions.
 
 **CRITICAL RULE - SINGLE TRUTH:**
 When using `CALCULATE_MATH`, you will receive a result from Python.
 You MUST copy that result EXACTLY into the [Main Answer].
-Do not re-calculate or round it yourself.
 
 **OUTPUT FORMAT:**
 [Main Answer: Definition + Context + Key Numbers]
@@ -229,12 +226,9 @@ else:
                         expression = text.split("CALCULATE_MATH(")[1][:-1]
                         result = safe_math_eval(expression)
                         st.toast(f"🧮 Computed: {result}", icon="✅")
-                        
-                        # FORCE CONSISTENCY: Python instructs the AI what to write
                         instruction = f"The result is {result}. You MUST state: 'The calculated amount is ₹{result}.' in the Main Answer section."
                         response = send_message_with_retry(st.session_state.chat_session, instruction)
                         text = response.text
-                        
                     except Exception as e: st.error(f"Math Tool Error: {e}")
 
                 # --- TOOL: HANDOVER ---
