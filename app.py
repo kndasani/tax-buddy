@@ -50,28 +50,20 @@ def inject_knowledge(persona_type):
 
 # Core 1: The Generic Math Engine (Safe Eval)
 def safe_math_eval(expression):
-    """
-    Safely evaluates simple math expressions from the AI.
-    Allowed: digits, operators, parens, min, max, abs, round
-    """
     try:
-        # 1. Sanitize: Allow only safe characters
+        # Sanitize: Allow only safe characters
         allowed_chars = set("0123456789+-*/()., minaxbsound ")
         if not set(expression).issubset(allowed_chars):
-            return "Error: Unsafe characters in formula."
-        
-        # 2. Evaluate in restricted scope
+            return "Error: Unsafe characters."
         safe_dict = {"min": min, "max": max, "abs": abs, "round": round}
         result = eval(expression, {"__builtins__": None}, safe_dict)
-        
-        # 3. Format result
         if isinstance(result, (int, float)):
             return f"{int(result):,}"
         return str(result)
     except Exception as e:
-        return f"Error calculating: {e}"
+        return f"Error: {e}"
 
-# Core 2: The Full Regime Calculator (Deterministic)
+# Core 2: The Full Regime Calculator
 def calculate_tax_detailed(age, salary, business_income, rent_paid, inv_80c, med_80d, custom_basic=0):
     std_deduction_new = 75000; std_deduction_old = 50000
     basic = custom_basic if custom_basic > 0 else (salary * 0.50)
@@ -121,54 +113,47 @@ def compute_tax_breakdown(income, age, regime):
     total = int(tax + surcharge + cess)
     return {"base": int(tax), "surcharge": int(surcharge), "cess": int(cess), "total": total}
 
-# --- 5. THE TWO BRAINS ---
+# --- 5. THE TWO BRAINS (The Fix) ---
 
-# Brain A: Calculator (The Interviewer)
+# Brain A: Calculator (FAST TRACK ENABLED)
 sys_instruction_calc = """
 You are "TaxGuide AI". 
-**Goal:** Interview the user. Be concise.
+**Goal:** Interview the user. Be helpful.
 
-**MEMORY RULE:** If the user states a number, REMEMBER IT.
-If later you ask for a breakdown (Basic/HRA) and they say "I don't know":
-1. Do NOT invent a new salary.
-2. Use the previously stated total salary to estimate.
-3. Assume Basic = 50% of the Stated Salary.
+**FAST TRACK RULE (CRITICAL):**
+If the user provides just an Income figure (e.g., "Tax on 15L") and asks for calculation:
+1. DO NOT ask for a full breakdown (HRA, 80C) immediately.
+2. Assume: Age=30, Rent=0, Deductions=0, Basic=50%.
+3. **CALCULATE IMMEDIATELY** with these defaults.
+4. After showing the result, ask: "That's the tax without deductions. Want to add Rent or Investments to lower it?"
+
+**MEMORY RULE:** - If user provides a Salary, REMEMBER IT. 
+- If details (Basic/HRA) are missing, Estimate Basic = 50% of Salary.
 
 **LOGIC FLOW:**
-1. **START:** Ask: "How do you earn your living?"
-2. **DETECT & LOAD:** (Salary/Business -> LOAD)
-3. **INTERVIEW:** Age -> Income -> Basic -> Deductions.
-4. **CALCULATE:** Output `CALCULATE(...)` with basic=0 if estimated.
+1. START: Ask Income Source.
+2. DETECT & LOAD.
+3. INTERVIEW: 
+   - If User gives FULL details -> Use them.
+   - If User gives ONLY Income -> **CALCULATE** (Fast Track).
 """
 
-# Brain B: The Professor (Universal Math Capable)
+# Brain B: The Professor (Assumption Friendly)
 sys_instruction_rules = """
 You are "TaxGuide AI".
 **Goal:** Answer user questions comprehensively.
 
-**CRITICAL RULE - UNIVERSAL MATH TOOL:**
-You are NOT allowed to do mental math for ANY tax question (HRA, Capital Gains, Deductions).
-Whenever a calculation is needed:
-1. Identify the formula based on the Rules (PDF).
-2. Construct a Python-valid math expression using `min`, `max`, `+`, `-`, `*`, `/`.
-3. Output: `CALCULATE_MATH(expression)`
-4. Wait for the result.
-
-**Examples:**
-- User: "What is my HRA exemption? (Rent=2L, Basic=5L)"
-  Formula: `min(200000 - 0.10*500000, 0.50*500000)`
-  Output: `CALCULATE_MATH(min(200000 - (0.10*500000), 0.50*500000))`
-
-- User: "Tax on 2L LTCG?" (Rule: 12.5% above 1.25L)
-  Output: `CALCULATE_MATH((200000 - 125000) * 0.125)`
+**CRITICAL RULE - MATH TOOL:**
+Use `CALCULATE_MATH(expression)` for all spot checks.
+- If user inputs are partial (e.g., "HRA on 20k rent"), **ASSUME** a standard Basic Salary (e.g., 50% of a typical income) to provide an answer. Do not refuse. State your assumption.
 
 **OUTPUT FORMAT:**
 [Main Answer] ||| [Technical Details]
 
 **LOGIC:**
 1. DETECT CONTEXT -> LOAD
-2. NEED MATH -> `CALCULATE_MATH(formula)`
-3. NEED FULL REPORT -> `SWITCH_TO_CALC`
+2. NEED MATH -> `CALCULATE_MATH`
+3. NEED FULL TAX CALC -> `SWITCH_TO_CALC`
 """
 
 # --- 6. UI HEADER ---
@@ -224,8 +209,7 @@ else:
             if parts and isinstance(parts[0], str): text = parts[0]
         else:
             role = msg.role; text = msg.parts[0].text
-        
-        # FIXED LINE 228
+            
         if text and "LOAD" not in text and "Result:" not in text and "SWITCH_TO_CALC" not in text and "CALCULATE_MATH" not in text:
             role_name = "user" if role == "user" else "assistant"
             avatar = "👤" if role == "user" else "🤖"
@@ -239,7 +223,7 @@ else:
                 response = send_message_with_retry(st.session_state.chat_session, prompt)
                 text = response.text
                 
-                # --- TOOL: UNIVERSAL MATH ---
+                # --- TOOL: MATH ---
                 if "CALCULATE_MATH(" in text:
                     try:
                         expression = text.split("CALCULATE_MATH(")[1][:-1]
