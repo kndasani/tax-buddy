@@ -141,7 +141,7 @@ If later you ask for a breakdown (Basic/HRA) and they say "I don't know":
 4. **CALCULATE:** Output `CALCULATE(...)` with basic=0 if estimated.
 """
 
-# Brain B: The Professor (Now Universal Math Capable)
+# Brain B: The Professor (Universal Math Capable)
 sys_instruction_rules = """
 You are "TaxGuide AI".
 **Goal:** Answer user questions comprehensively.
@@ -224,5 +224,114 @@ else:
             if parts and isinstance(parts[0], str): text = parts[0]
         else:
             role = msg.role; text = msg.parts[0].text
-            
-        if text and "LOAD" not in text and "Result:" not in text and "SWITCH_TO_CALC" not in text
+        
+        # FIXED LINE 228
+        if text and "LOAD" not in text and "Result:" not in text and "SWITCH_TO_CALC" not in text and "CALCULATE_MATH" not in text:
+            role_name = "user" if role == "user" else "assistant"
+            avatar = "👤" if role == "user" else "🤖"
+            render_message(text, role_name, avatar)
+
+    if prompt := st.chat_input("Type here..."):
+        st.chat_message("user", avatar="👤").markdown(prompt)
+        
+        with st.spinner("Thinking..."):
+            try:
+                response = send_message_with_retry(st.session_state.chat_session, prompt)
+                text = response.text
+                
+                # --- TOOL: UNIVERSAL MATH ---
+                if "CALCULATE_MATH(" in text:
+                    try:
+                        expression = text.split("CALCULATE_MATH(")[1][:-1]
+                        result = safe_math_eval(expression)
+                        st.toast(f"🧮 Computed: {result}", icon="✅")
+                        response = send_message_with_retry(st.session_state.chat_session, 
+                            f"The calculated result is {result}. Use this exact number in your answer.")
+                        text = response.text
+                    except Exception as e: st.error(f"Math Tool Error: {e}")
+
+                # --- TOOL: HANDOVER ---
+                if "SWITCH_TO_CALC" in text:
+                    st.session_state.mode = "CALC"
+                    current_hist = st.session_state.chat_session.history[:-1]
+                    model = genai.GenerativeModel('gemini-2.0-flash', system_instruction=sys_instruction_calc)
+                    st.session_state.chat_session = model.start_chat(history=current_hist)
+                    st.toast("🔄 Switching to Calculator...", icon="🧮")
+                    time.sleep(1)
+                    response = send_message_with_retry(st.session_state.chat_session, "User wants to calculate. Acknowledge and start Interview.")
+                    text = response.text
+
+                # --- TOOL: LOAD PDF ---
+                if "LOAD(" in text:
+                    persona = text.split("LOAD(")[1].split(")")[0]
+                    if st.session_state.loaded_persona != persona:
+                        file_ref = inject_knowledge(persona)
+                        if file_ref:
+                            hist = st.session_state.chat_session.history[:-1]
+                            hist.append({"role": "user", "parts": [file_ref, "Rules loaded."]})
+                            hist.append({"role": "model", "parts": ["Understood."]})
+                            current_instruction = sys_instruction_calc if st.session_state.mode == "CALC" else sys_instruction_rules
+                            model = genai.GenerativeModel('gemini-2.0-flash', system_instruction=current_instruction)
+                            st.session_state.chat_session = model.start_chat(history=hist)
+                            st.session_state.loaded_persona = persona
+                            st.toast(f"📚 Context Loaded: {persona}", icon="✅")
+                            time.sleep(2)
+                            next_msg = "Context loaded. Continue."
+                            response = send_message_with_retry(st.session_state.chat_session, next_msg)
+                            text = response.text
+
+                # --- TOOL: FULL CALCULATOR ---
+                if "CALCULATE(" in text:
+                    try:
+                        params = text.split("CALCULATE(")[1].split(")")[0]
+                        data = {"age":30, "salary":0, "business":0, "rent":0, "inv80c":0, "med80d":0, "basic":0}
+                        for part in params.split(","):
+                            if "=" in part:
+                                k, v = part.split("="); 
+                                vc = ''.join(filter(str.isdigit, v.strip()))
+                                if vc: data[k.strip()] = int(vc)
+                        
+                        res = calculate_tax_detailed(
+                            data['age'], data['salary'], data['business'], 
+                            data['rent'], data['inv80c'], data['med80d'],
+                            custom_basic=data['basic']
+                        )
+                        tn = res['new']['breakdown']['total']
+                        to = res['old']['breakdown']['total']
+                        winner = "New Regime" if tn < to else "Old Regime"
+                        savings = abs(tn - to)
+                        
+                        st.chat_message("assistant", avatar="🤖").markdown(f"""
+                        ### 🧾 Tax Analysis
+                        **Recommendation:** Go with **{winner}** (Save ₹{savings:,})
+                        
+                        | Component | **New Regime** | **Old Regime** |
+                        | :--- | :--- | :--- |
+                        | Taxable Income | ₹{res['new']['net']:,} | ₹{res['old']['net']:,} |
+                        | Base Tax | ₹{res['new']['breakdown']['base']:,} | ₹{res['old']['breakdown']['base']:,} |
+                        | Cess (4%) | ₹{res['new']['breakdown']['cess']:,} | ₹{res['old']['breakdown']['cess']:,} |
+                        | **TOTAL** | **₹{tn:,}** | **₹{to:,}** |
+                        """)
+                        
+                        with st.expander("📂 View Deduction Mapping (For HR Portal)"):
+                            st.markdown("Use these figures when declaring tax to your employer:")
+                            st.markdown(f"""
+                            | Your Input | Income Tax Section | Amount Deducted |
+                            | :--- | :--- | :--- |
+                            | Standard Ded. | **Sec 16(ia)** | ₹50,000 |
+                            | Rent Paid | **Sec 10(13A)** (HRA) | ₹{res['old']['deductions']['hra']:,} |
+                            | PF / LIC / PPF | **Sec 80C** | ₹{res['old']['deductions']['80c']:,} |
+                            | Health Ins. | **Sec 80D** | ₹{res['old']['deductions']['80d']:,} |
+                            """)
+                            st.caption("*Note: HRA is calculated based on Rent vs Basic Salary.*")
+                            st.markdown("")
+                            st.markdown("")
+
+                        st.session_state.chat_session.history.append({"role": "model", "parts": [f"Result: New={tn}, Old={to}"]})
+                    except Exception as e: st.error(f"Calc Error: {e}")
+
+                else:
+                    if "LOAD(" not in text and "SWITCH_TO_CALC" not in text and "CALCULATE_MATH" not in text:
+                        render_message(text, "assistant", "🤖")
+
+            except Exception as e: st.error(f"Error: {e}")
