@@ -50,7 +50,6 @@ def inject_knowledge(persona_type):
 # --- 4. CALCULATOR ENGINES ---
 
 def safe_math_eval(expression):
-    """Robust Math Tool for Spot Checks"""
     try:
         if ":" in expression: expression = expression.split(":")[-1]
         if "=" in expression: expression = expression.split("=")[-1]
@@ -58,11 +57,9 @@ def safe_math_eval(expression):
         expression = expression.replace("\n", " ").replace("\t", " ") 
         expression = expression.replace("`", "").replace("₹", "")       
         expression = expression.replace("%", "*0.01").replace("^", "**")     
-        
         expression = re.sub(r'(\d),(\d)', r'\1\2', expression)
         allowed = set("0123456789+-*/()., <>=abcdefhilmnorstuwx")
         if not set(expression).issubset(allowed): return "Error: Unsafe characters"
-
         safe_dict = {"min": min, "max": max, "abs": abs, "round": round, "int": int, "float": float, "pow": pow, "ceil": math.ceil, "floor": math.floor}
         result = eval(expression, {"__builtins__": None}, safe_dict)
         if isinstance(result, (int, float)): return f"{int(result):,}"
@@ -77,7 +74,6 @@ def calculate_hra_exemption(basic_annual, rent_annual, metro=True):
 def calculate_tax_detailed(age, salary, business_income, rent_paid, inv_80c, med_80d, home_loan, nps, edu_loan, donations, savings_int, other_deductions, custom_basic=0):
     std_deduction_new = 75000; std_deduction_old = 50000
     
-    # 1. Basic Salary
     basic = 0
     if custom_basic > 0:
         if custom_basic < 100: basic = salary * (custom_basic / 100.0)
@@ -85,47 +81,26 @@ def calculate_tax_detailed(age, salary, business_income, rent_paid, inv_80c, med
     else:
         basic = salary * 0.50 
 
-    # 2. Rent Logic
     final_rent = rent_paid
     if rent_paid > 0 and rent_paid < (salary * 0.15):
         final_rent = rent_paid * 12 
 
     hra_exemption = calculate_hra_exemption(basic, final_rent)
     
-    # 3. Expanded Deductions Logic (The "Official Calculator" sections)
-    
-    # 80TTA/TTB: Savings Interest (Max 10k normally, 50k for Seniors)
     limit_80tta = 50000 if age >= 60 else 10000
     deduction_80tta = min(savings_int, limit_80tta)
-    
-    # 80E: Education Loan Interest (100% Deductible for 8 years)
     deduction_80e = edu_loan
-    
-    # 80G: Donations (Pass-through: assuming user gives eligible amount)
     deduction_80g = donations
-    
-    # 24b: Home Loan Interest
     deduction_home_loan = min(home_loan, 200000)
-    
-    # 80CCD(1B): NPS
     deduction_nps = min(nps, 50000)
 
-    # 4. Income Computation
     taxable_business = business_income * 0.50
     gross = salary + taxable_business
     
-    # Total Old Regime Deductions
     deductions_old = (
-        std_deduction_old + 
-        hra_exemption + 
-        min(inv_80c, 150000) + 
-        med_80d + 
-        deduction_home_loan + 
-        deduction_nps +
-        deduction_80e +
-        deduction_80g +
-        deduction_80tta +
-        other_deductions
+        std_deduction_old + hra_exemption + min(inv_80c, 150000) + med_80d + 
+        deduction_home_loan + deduction_nps + deduction_80e + 
+        deduction_80g + deduction_80tta + other_deductions
     )
     
     net_old = max(0, gross - deductions_old)
@@ -187,25 +162,27 @@ def compute_tax_breakdown(income, age, regime):
 sys_instruction_unified = """
 You are "TaxGuide AI".
 
-**PRIME DIRECTIVE:**
-1. **Estimate Immediately:** If you have Salary, calculate tax instantly using defaults.
-2. **Walkthrough (Progressive Disclosure):** AFTER the first estimate, proactively ask:
-   *"Do you have Education Loans (80E), Donations (80G), Savings Interest (80TTA), or other deductions?"*
-3. **Handle Monthly:** Multiply monthly figures by 12 internally.
+**PHASE 1: THE QUICK SCAN (Estimate)**
+1. **Trigger:** User gives Salary (or Salary + Rent).
+2. **Action:** `CALCULATE(...)` immediately using defaults for anything missing.
+3. **Post-Calc Message:**
+   - "I have calculated your tax based on your Salary (and Rent if provided)."
+   - "⚠️ **Note:** I assumed you have **0** other investments."
+   - "Would you like a **step-by-step guide** to input your investments (like PF, Insurance, Loans) to lower your tax?"
 
-**TOOL SELECTION:**
-- **User asks "Calculate Tax" (with Salary)** -> `CALCULATE(...)`
-- **User provides "Education Loan Interest 50k"** -> `CALCULATE(..., edu_loan=50000)`
-- **User asks "What is my HRA?"** -> `CALCULATE_MATH(...)`
+**PHASE 2: THE GUIDED AUDIT (Step-by-Step)**
+1. **Trigger:** User says "Yes" or "Guide me".
+2. **Action:** Ask about **ONE** category at a time in **SIMPLE ENGLISH**.
+   - Q1: "Do you pay any **Rent**? If yes, how much per month?" (Skip if already known)
+   - Q2: "Do you contribute to **EPF, PPF, or Life Insurance**? (Limit: 1.5L)"
+   - Q3: "Do you pay for **Health Insurance** for yourself or parents?"
+   - Q4: "Do you have a **Home Loan** or **Education Loan**?"
+3. **After Each Answer:** Run `CALCULATE(...)` again to show the *new* tax savings immediately.
 
-**DEDUCTION DICTIONARY:**
-When extracting data, map to these keys:
-- `home_loan` (Section 24b)
-- `nps` (Section 80CCD 1B)
-- `edu_loan` (Section 80E)
-- `donations` (Section 80G)
-- `savings_int` (Section 80TTA/TTB)
-- `other` (Any other deduction amount)
+**CRITICAL RULES:**
+- **Monthly Math:** Automatically multiply monthly inputs by 12.
+- **No Jargon:** Don't say "Section 80CCD(1B)". Say "NPS".
+- **Tool Use:** ALWAYS use `CALCULATE` when numbers change.
 
 **OUTPUT FORMAT:**
 [Summary]
@@ -235,7 +212,7 @@ if not st.session_state.chat_started:
             st.session_state.chat_started = True
             model = genai.GenerativeModel('gemini-2.0-flash', system_instruction=sys_instruction_unified)
             st.session_state.chat_session = model.start_chat(history=[])
-            st.session_state.chat_session.history.append({"role": "model", "parts": ["Hi! To give you an accurate estimate, what is your Annual Salary?"]})
+            st.session_state.chat_session.history.append({"role": "model", "parts": ["Hi! Let's start with the basics. What is your **Annual Salary**?"]})
             st.rerun()
     with c2:
         if st.button("📚 Ask Tax Rules", use_container_width=True):
@@ -252,8 +229,10 @@ else:
             if "|||" in text:
                 summary, details = text.split("|||", 1)
                 st.markdown(summary.strip())
-                with st.expander("📝 View Details & Assumptions"):
-                    st.markdown(details.strip())
+                # Only show expander if there is actually content
+                if len(details.strip()) > 5:
+                    with st.expander("📝 View Details & Assumptions"):
+                        st.markdown(details.strip())
             else:
                 st.markdown(text)
 
@@ -273,7 +252,7 @@ else:
         if text and not any(x in text for x in ["CALCULATE(", "CALCULATE_MATH(", "LOAD(", "Result:"]):
             render_message(text, role_label, role_icon)
 
-    if prompt := st.chat_input("Ex: Salary 15L, Rent 20k..."):
+    if prompt := st.chat_input("Ex: Salary 15L..."):
         st.chat_message("user", avatar="👤").markdown(prompt)
         
         with st.spinner("Processing..."):
@@ -307,7 +286,6 @@ else:
 
                 # --- TOOL 3: FULL CALCULATOR ---
                 if "CALCULATE(" in text:
-                    # EXTENDED PARSING
                     params = text.split("CALCULATE(")[1].split(")")[0]
                     d = {"age":30, "salary":0, "business":0, "rent":0, "inv80c":0, "med80d":0, "basic":0, "home_loan":0, "nps":0, "edu_loan":0, "donations":0, "savings_int":0, "other":0}
                     for p in params.split(","):
@@ -316,42 +294,54 @@ else:
                             vc = ''.join(filter(str.isdigit, v))
                             if vc: d[k.strip()] = int(vc)
                     
-                    # RUN CALCULATION
                     res = calculate_tax_detailed(
                         d['age'], d['salary'], d['business'], d['rent'], 
                         d['inv80c'], d['med80d'], d['home_loan'], d['nps'],
                         d['edu_loan'], d['donations'], d['savings_int'], d['other'], d['basic']
                     )
                     tn, to = res['new']['breakdown']['total'], res['old']['breakdown']['total']
-                    winner, savings = ("New", to-tn) if tn < to else ("Old", tn-to)
                     
-                    used_basic = res['old']['assumptions']['basic']
+                    # Determine Winner
+                    if tn < to:
+                        winner = "New Regime"
+                        savings = to - tn
+                        color = "green"
+                    else:
+                        winner = "Old Regime"
+                        savings = tn - to
+                        color = "blue"
+                    
+                    # Highlight Assumptions
+                    assumed_text = ""
+                    if d['rent'] == 0: assumed_text += "- **Rent:** ₹0 (Assumed)\n"
+                    if d['inv80c'] == 0: assumed_text += "- **80C Investments:** ₹0 (Assumed)\n"
+                    if d['home_loan'] == 0: assumed_text += "- **Home Loan:** ₹0 (Assumed)\n"
                     
                     report = f"""
-                    ### 🧾 Tax Estimate
-                    **Recommendation:** **{winner} Regime** is better. (Save ₹{savings:,})
-                    
+                    ### 📊 Tax Comparison
                     | | **New Regime** | **Old Regime** |
                     | :--- | :--- | :--- |
-                    | Taxable Income | ₹{res['new']['net']:,} | ₹{res['old']['net']:,} |
                     | **Total Tax** | **₹{tn:,}** | **₹{to:,}** |
                     
-                    ||| 
-                    **Breakdown of Old Regime Deductions:**
-                    * **Standard Deduction:** ₹50,000
-                    * **80C (PF/LIC):** ₹{res['old']['deductions']['80c']:,} 
-                    * **HRA Exemption:** ₹{res['old']['deductions']['hra']:,} 
-                    * **Home Loan (Sec 24b):** ₹{res['old']['deductions']['home_loan']:,}
-                    * **NPS (80CCD 1B):** ₹{res['old']['deductions']['nps']:,}
-                    * **Edu Loan (80E):** ₹{res['old']['deductions']['80e']:,}
-                    * **Donations (80G):** ₹{res['old']['deductions']['80g']:,}
-                    * **Savings Int (80TTA):** ₹{res['old']['deductions']['80tta']:,}
-                    * **Other:** ₹{res['old']['deductions']['other']:,}
+                    **:trophy: Winner:** :{color}[**{winner}**] saves you **₹{savings:,}**
                     
-                    *Assumed Basic Salary: ₹{used_basic:,}*
+                    ---
+                    **⚠️ Current Assumptions (Used for Calculation):**
+                    {assumed_text}
+                    *To reduce your tax, I can guide you through these missing deductions.*
+                    
+                    ||| 
+                    **Detailed Breakdown:**
+                    * **Gross Income:** ₹{d['salary']:,}
+                    * **Standard Deduction:** ₹75,000 (New) / ₹50,000 (Old)
+                    *  **HRA Exemption:** ₹{res['old']['deductions']['hra']:,}
+                    *  **80C (PF/PPF):** ₹{res['old']['deductions']['80c']:,}
+                    *  **Home Loan Interest:** ₹{res['old']['deductions']['home_loan']:,}
+                    * **Health Ins (80D):** ₹{res['old']['deductions']['med80d']:,}
+                    * **NPS:** ₹{res['old']['deductions']['nps']:,}
                     """
                     st.chat_message("assistant", avatar="🤖").markdown(report.split("|||")[0])
-                    with st.expander("📝 View Details & Assumptions"): st.markdown(report.split("|||")[1])
+                    with st.expander("📝 View Full Breakdown"): st.markdown(report.split("|||")[1])
                     
                     st.session_state.chat_session.history.append({"role": "model", "parts": [f"Result shown: New={tn}, Old={to}"]})
 
