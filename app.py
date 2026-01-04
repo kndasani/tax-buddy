@@ -49,29 +49,32 @@ def inject_knowledge(persona_type):
 
 # --- 4. CALCULATOR ENGINE ---
 
-# Core 1: The Robust Math Engine (Patched for Markdown)
+# Core 1: The Robust Math Engine (Patched for Variables & Comments)
 def safe_math_eval(expression):
     try:
-        # 1. Cleaning & Normalization
+        # 1. Strip Comments (The # character)
+        expression = expression.split('#')[0]
+        
+        # 2. Cleaning & Normalization
         expression = expression.lower()
         expression = expression.replace("\n", " ").replace("\t", " ") 
-        expression = expression.replace("`", "")       # <--- FIX: Remove markdown backticks
+        expression = expression.replace("`", "")       
         expression = expression.replace("₹", "")       
         expression = expression.replace("%", "*0.01")  
         expression = expression.replace("^", "**")     
         
-        # 2. Smart Comma Handling
-        # Remove commas inside numbers (e.g., 1,00,000 -> 100000)
+        # 3. Smart Comma Handling
         expression = re.sub(r'(\d),(\d)', r'\1\2', expression)
         
-        # 3. Whitelist Validation
-        allowed_chars = set("0123456789+-*/()., <>=abcdefhilmnorstuwx")
+        # 4. Whitelist Validation
+        # Added 'p' (for pow), '_' (for numbers like 10_000)
+        allowed_chars = set("0123456789+-*/()., <>=_abcdefhilmnoprstuwx")
         
         if not set(expression).issubset(allowed_chars):
             bad_chars = set(expression) - allowed_chars
             return f"Error: Unsafe characters found: {bad_chars}"
 
-        # 4. Safe Evaluation
+        # 5. Safe Evaluation
         safe_dict = {
             "min": min, "max": max, "abs": abs, "round": round,
             "int": int, "float": float, "pow": pow,
@@ -80,7 +83,7 @@ def safe_math_eval(expression):
         
         result = eval(expression, {"__builtins__": None}, safe_dict)
         
-        # 5. Formatting
+        # 6. Formatting
         if isinstance(result, (int, float)):
             return f"{int(result):,}"
         return str(result)
@@ -155,20 +158,20 @@ You are "TaxGuide AI".
 **MEMORY:** Remember user data.
 """
 
-# Brain B: The Professor (Proactive & Smart)
+# Brain B: The Professor (STRICT NUMBERS ONLY)
 sys_instruction_rules = """
 You are "TaxGuide AI".
 **Goal:** Answer user questions accurately using Python.
 
-**AUTO-TRIGGER RULE (CRITICAL):**
-If the user provides numbers (e.g., "Salary 15L, Rent 20k"):
-1. **DO NOT JUST ACKNOWLEDGE.**
-2. Assume they want to know the HRA Exemption or Tax Impact.
-3. Immediately form the formula and output `CALCULATE_MATH(...)`.
+**CRITICAL RULE - MATH TOOL:**
+Use `CALCULATE_MATH(expression)` for all spot checks.
 
-**MISSING DATA RULE:**
-- If Basic Salary is missing: **Silently use 50% of Total Salary.** Do NOT ask for it.
-- If Monthly figures given: Convert to Annual inside the formula (x12).
+**RESTRICTIONS:**
+1. **NUMBERS ONLY:** You MUST replace all variables with actual numbers.
+   - ❌ BAD: `CALCULATE_MATH(rent * 12)`
+   - ✅ GOOD: `CALCULATE_MATH(20000 * 12)`
+2. **NO COMMENTS:** Do not add `#` or text inside the formula.
+3. **MISSING DATA:** If Basic Salary is unknown, use `0.50 * Total_Salary` directly in the math.
 
 **SINGLE TRUTH:**
 You MUST copy the result provided by Python exactly.
