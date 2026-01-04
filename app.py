@@ -68,10 +68,10 @@ def safe_math_eval(expression):
 
 def calculate_hra_exemption(basic_annual, rent_annual, hra_received_annual, metro=True):
     """
-    Calculates HRA Exemption based on the 3 limits.
-    1. Actual HRA Received.
-    2. Rent Paid - 10% of Basic.
-    3. 50% of Basic (Metro) / 40% (Non-Metro).
+    Calculates HRA Exemption based on the 3 limits:
+    1. Actual HRA Received
+    2. Rent Paid - 10% of Basic
+    3. 50% of Basic (Metro)
     """
     # Limit 1: Actual HRA
     cond1 = hra_received_annual
@@ -97,7 +97,7 @@ def calculate_tax_detailed(age, salary, business_income, rent_paid, hra_received
         basic = salary * 0.50 # Default assumption
 
     # 2. HRA Received Logic
-    # If user didn't specify HRA Received, we assume a standard 40% of Basic.
+    # If user didn't specify HRA Received, we assume 40% of Basic (Safe default)
     final_hra_received = hra_received
     if hra_received == 0:
         final_hra_received = basic * 0.40
@@ -107,9 +107,11 @@ def calculate_tax_detailed(age, salary, business_income, rent_paid, hra_received
     if rent_paid > 0 and rent_paid < (salary * 0.15):
         final_rent = rent_paid * 12 
 
-    hra_exemption = calculate_hra_exemption(basic, final_rent, final_hra_received, metro=True) # Assuming Metro (Bengaluru)
+    # 4. Calculate HRA Exemption
+    # FIXED: Now passing all 3 required arguments + metro flag
+    hra_exemption = calculate_hra_exemption(basic, final_rent, final_hra_received, metro=True) 
     
-    # 4. Other Deductions
+    # 5. Other Deductions
     limit_80tta = 50000 if age >= 60 else 10000
     deduction_80tta = min(savings_int, limit_80tta)
     deduction_80e = edu_loan
@@ -191,17 +193,22 @@ You are "TaxGuide AI".
 
 **PHASE 1: THE QUICK SCAN**
 1. **Trigger:** User gives Salary.
-2. **Action:** `CALCULATE(...)` immediately.
-3. **Data Parsing:**
-   - Look for "HRA Received" or "HRA Allowance" -> map to `hra_received`.
-   - Look for "Rent Paid" -> map to `rent`.
-   - **Important:** If user says "My HRA is 20k", that usually means *HRA Received*.
-   - If user says "I pay 20k rent", that is *Rent Paid*.
-   - Distinguish between the two.
+2. **Action:** `CALCULATE(...)` immediately using defaults.
+3. **Message:** "I've estimated your tax based on Salary. Defaults used for the rest."
+4. **Follow-up:** "Reply with 'PF 1L', 'Rent 20k', 'HRA Received 3L' etc. to customize."
 
 **PHASE 2: THE AUDIT**
 1. **Trigger:** User updates data.
 2. **Action:** `CALCULATE(...)` with new data.
+
+**NEGATIVE CONSTRAINTS (DO NOT IGNORE):**
+- **NEVER output Python code blocks.**
+- **NEVER define classes or functions in your response.**
+- **ALWAYS use the tools provided.**
+
+**DATA PARSING RULES:**
+- **"HRA" vs "Rent":** If user says "HRA is 20k", put it in `hra_received`. If "Rent is 20k", put it in `rent`.
+- **Monthly:** x12 internally.
 
 **OUTPUT FORMAT:**
 [Summary Text]
@@ -296,7 +303,6 @@ else:
                 # --- TOOL 3: FULL CALCULATOR (WITH NATIVE UI) ---
                 if "CALCULATE(" in text:
                     params = text.split("CALCULATE(")[1].split(")")[0]
-                    # ADDED 'hra_received' to dictionary
                     d = {"age":30, "salary":0, "business":0, "rent":0, "hra_received":0, "inv80c":0, "med80d":0, "basic":0, "home_loan":0, "nps":0, "edu_loan":0, "donations":0, "savings_int":0, "other":0}
                     for p in params.split(","):
                         if "=" in p:
@@ -336,7 +342,7 @@ else:
                                        res['old']['deductions']['other'])
 
                         table_data = {
-                            "Item": ["Gross Salary", "HRA Exemption [Image of HRA tax exemption]", "Standard Deduction", "80C (PF/LIC/PPF) [Image of Section 80C 80D tax deduction list]", "NPS (80CCD) [Image of tax deduction 80C vs 80CCD vs 24b]", "Home Loan Interest [Image of Section 24b home loan tax benefit]", "Health Ins (80D)", "Other (Edu/Donations/Int)", "Taxable Income", "Net Tax Payable"],
+                            "Item": ["Gross Salary", "HRA Exemption ", "Standard Deduction", "80C (PF/LIC/PPF) ", "NPS (80CCD) ", "Home Loan Interest ", "Health Ins (80D)", "Other (Edu/Donations/Int)", "Taxable Income", "Net Tax Payable"],
                             "New Regime": [
                                 f"₹{d['salary']:,}", "₹0", "₹75,000", "₹0", "₹0", "₹0", "₹0", "₹0",
                                 f"₹{res['new']['net']:,}", f"₹{tn:,}"
@@ -362,7 +368,6 @@ else:
                         if d['inv80c'] == 0: assumptions.append("80C: ₹0")
                         if d['home_loan'] == 0: assumptions.append("Home Loan: ₹0")
                         
-                        # Show calculated/assumed HRA received
                         used_basic = res['old']['assumptions']['basic']
                         used_hra_rec = res['old']['assumptions']['hra_received']
                         
